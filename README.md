@@ -5,7 +5,7 @@ A minimalist Markdown editor for macOS where every letter blooms onto the page.
 The point of Plume is the *feel* of typing. Each character enters with a 90 ms
 opacity rise; the rest of the app gets out of the way. Dark, focused, small.
 
-→ **[Live demo](https://zabrodsk.github.io/plume/)**
+→ **[Live demo](https://plume-md.pages.dev)**
 → **[Download for macOS](https://github.com/zabrodsk/plume/releases/latest)**
 
 ## Build from source
