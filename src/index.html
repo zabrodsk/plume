@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plume</title>
+<style>
+  :root {
+    --bg: #1a1815;
+    --ink: #e8e4d8;
+    --ghost: #4a4640;
+    --caret: #79b8ff;
+    --selection: rgba(121, 184, 255, 0.22);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: "iA Writer Mono S", "iA Writer Mono", "JetBrains Mono",
+                 "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .editor {
+    position: absolute; inset: 0;
+    padding: 64px max(96px, 12vw) 48px;
+    overflow-y: auto; overflow-x: hidden;
+    cursor: text;
+    /* Hint to the browser: scroll position changes; the layer can be cached. */
+    contain: layout paint;
+  }
+  .editor::-webkit-scrollbar { width: 0; height: 0; }
+
+  .textbox {
+    font-family: inherit;
+    font-size: 17px;
+    line-height: 1.78;
+    letter-spacing: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    tab-size: 2;
+    margin: 0; padding: 0; border: 0;
+    background: transparent;
+  }
+
+  /* Render layer holds plain text plus, transiently, ONE freshly-typed span.
+     `contain: layout style` lets the browser skip layout work for content that
+     hasn't moved. */
+  .render-layer {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+    min-height: 100%;
+    color: var(--ink);
+    user-select: none;
+    contain: layout style;
+  }
+
+  .input-layer {
+    position: absolute;
+    top: 64px;
+    left: max(96px, 12vw);
+    width: calc(100% - 2 * max(96px, 12vw));
+    color: transparent;
+    caret-color: var(--caret);
+    outline: none; resize: none;
+    overflow: hidden;
+    z-index: 2;
+    user-select: text;
+  }
+  .input-layer::selection { background: var(--selection); }
+
+  /* The fresh char. NO `will-change` — there's only ever ≤1 of these in the
+     DOM at a time, so GPU-layer hinting is unnecessary and harmful. */
+  .ch {
+    display: inline;
+    animation: appear 90ms ease-out both;
+  }
+  @keyframes appear {
+    from { opacity: 0.4; }
+    to   { opacity: 1; }
+  }
+
+  .hint {
+    position: absolute;
+    top: 64px;
+    left: max(96px, 12vw);
+    color: var(--ghost);
+    font-size: 17px;
+    line-height: 1.78;
+    pointer-events: none;
+    user-select: none;
+    transition: opacity 200ms ease;
+    z-index: 0;
+  }
+  .hint.gone { opacity: 0; }
+</style>
+</head>
+<body>
+  <div class="editor" id="editor">
+    <div class="hint textbox" id="hint">Start writing…</div>
+    <div class="render-layer textbox" id="render"></div>
+    <textarea class="input-layer textbox"
+              id="input"
+              autofocus
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              wrap="soft"></textarea>
+  </div>
+<script>
+  const $editor = document.getElementById('editor');
+  const $render = document.getElementById('render');
+  const $input  = document.getElementById('input');
+  const $hint   = document.getElementById('hint');
+  $hint.textContent = 'Start writing…';
+
+  const native = (typeof window.webkit !== 'undefined' &&
+                  window.webkit.messageHandlers) ? window.webkit.messageHandlers : null;
+
+  let clean = true;
+  let mergeTimer = null;
+
+  function notifyDirty() {
+    if (clean && native && native.dirty) native.dirty.postMessage(true);
+    clean = false;
+  }
+
+  // Replace render layer with a single Text node — minimum possible DOM.
+  function setRenderText(text) {
+    $render.textContent = text;
+  }
+
+  // Lay out: [text before cursor] + [fresh span] + [text after cursor].
+  // Exactly three nodes, regardless of document size.
+  function renderWithFresh(fullText, pos, ch) {
+    while ($render.firstChild) $render.removeChild($render.firstChild);
+    if (pos > 0) $render.appendChild(document.createTextNode(fullText.slice(0, pos)));
+    const span = document.createElement('span');
+    span.className = 'ch';
+    span.textContent = ch;
+    $render.appendChild(span);
+    const tail = fullText.slice(pos + ch.length);
+    if (tail) $render.appendChild(document.createTextNode(tail));
+  }
+
+  // After a brief idle, collapse the fresh span back into a single Text node.
+  function scheduleMerge() {
+    if (mergeTimer != null) clearTimeout(mergeTimer);
+    mergeTimer = setTimeout(() => {
+      setRenderText($input.value);
+      mergeTimer = null;
+    }, 140);
+  }
+
+  let lastRenderHeight = 0;
+  function resizeTextarea() {
+    const h = $render.offsetHeight;
+    if (h !== lastRenderHeight) {
+      $input.style.height = h + 'px';
+      lastRenderHeight = h;
+    }
+  }
+
+  function updateHint() {
+    if ($input.value.length > 0) $hint.classList.add('gone');
+    else $hint.classList.remove('gone');
+  }
+
+  $input.addEventListener('input', (e) => {
+    const want = $input.value;
+    // Animate single-character insertText only. Paste, autocomplete, delete,
+    // and any composition event take the snap path.
+    if (e.inputType === 'insertText' && e.data && e.data.length === 1) {
+      const pos = $input.selectionStart - 1;
+      renderWithFresh(want, pos, e.data);
+      scheduleMerge();
+    } else {
+      if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
+      setRenderText(want);
+    }
+    resizeTextarea();
+    updateHint();
+    notifyDirty();
+  });
+
+  $editor.addEventListener('mousedown', (e) => {
+    if (e.target !== $input) $input.focus();
+  });
+
+  window.addEventListener('resize', resizeTextarea);
+
+  window.creamyAPI = {
+    setContent(text, _path) {
+      if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
+      const t = (text == null) ? '' : String(text);
+      $input.value = t;
+      setRenderText(t);
+      resizeTextarea();
+      updateHint();
+      $input.setSelectionRange(0, 0);
+      $input.focus();
+      clean = true;
+    },
+    getContent() { return $input.value; },
+    markClean() { clean = true; }
+  };
+
+  if (native && native.ready) native.ready.postMessage(true);
+
+  resizeTextarea();
+  updateHint();
+  requestAnimationFrame(() => $input.focus());
+</script>
+</body>
+</html>

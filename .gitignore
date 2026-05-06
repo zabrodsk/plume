@@ -1,0 +1,16 @@
+# Build artifacts
+src/Plume.app/
+src/AppIcon.iconset/
+src/AppIcon.icns
+src/*.dSYM/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local development
+*.log

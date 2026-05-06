@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plume — A Markdown editor for the satisfaction of typing</title>
+<meta name="description" content="Plume is a minimalist Markdown editor for macOS where every letter blooms onto the page. Dark by default. Built for focus.">
+<meta property="og:title" content="Plume — A Markdown editor for the satisfaction of typing">
+<meta property="og:description" content="Every letter blooms. Dark by default. Built for focus.">
+<meta name="theme-color" content="#1a1815">
+<link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231a1815'/><text x='50' y='78' font-family='Times' font-style='italic' font-size='80' fill='%23e8e4d8' text-anchor='middle'>p</text></svg>">
+<style>
+/* ── Tokens ────────────────────────────────────────────────────────────── */
+:root {
+  --bg:          #1a1815;
+  --bg-elev:     #221e18;
+  --bg-deep:     #131110;
+  --ink:         #e8e4d8;
+  --cream:       #d4cfc0;
+  --ghost:       #6a655c;
+  --line:        #2c2823;
+  --accent:      #79b8ff;
+  --accent-soft: rgba(121, 184, 255, 0.18);
+  --accent-glow: rgba(121, 184, 255, 0.45);
+  --warm:        #d8a36a;
+
+  --serif: ui-serif, "New York", "Hoefler Text", "Cardo", Georgia, serif;
+  --mono:  ui-monospace, "iA Writer Mono S", "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --sans:  -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+
+  --ease:     cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+body {
+  /* subtle warm vignette gradient */
+  background:
+    radial-gradient(ellipse 90% 60% at 50% -10%, #2a2520 0%, transparent 60%),
+    radial-gradient(ellipse 80% 50% at 50% 100%, #1d1814 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+::selection { background: var(--accent-soft); color: var(--ink); }
+
+a { color: inherit; text-decoration: none; }
+
+/* ── Scroll progress bar ───────────────────────────────────────────────── */
+.scroll-progress {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%;
+  height: 2px;
+  z-index: 100;
+  pointer-events: none;
+}
+.scroll-progress::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: var(--scroll, 0%);
+  background: linear-gradient(90deg, var(--accent), var(--warm));
+  box-shadow: 0 0 14px var(--accent-glow);
+  transition: width 80ms linear;
+}
+
+/* ── Nav ───────────────────────────────────────────────────────────────── */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px clamp(20px, 4vw, 48px);
+  background: transparent;
+  transition: background 320ms var(--ease), backdrop-filter 320ms var(--ease),
+              border-color 320ms var(--ease);
+  border-bottom: 1px solid transparent;
+}
+.nav.solid {
+  background: rgba(26, 24, 21, 0.7);
+  backdrop-filter: saturate(140%) blur(18px);
+  -webkit-backdrop-filter: saturate(140%) blur(18px);
+  border-bottom-color: var(--line);
+}
+.nav-brand {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: baseline;
+}
+.nav-brand .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 1px;
+  margin-left: 4px;
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: blink 1.05s ease-in-out infinite;
+}
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+.nav-links {
+  display: flex;
+  gap: clamp(16px, 3vw, 32px);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--cream);
+}
+.nav-links a {
+  position: relative;
+  padding: 4px 0;
+  transition: color 200ms var(--ease);
+}
+.nav-links a:hover { color: var(--ink); }
+.nav-links a.cta {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition: all 200ms var(--ease);
+  background: transparent;
+}
+.nav-links a.cta:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* ── Layout primitives ─────────────────────────────────────────────────── */
+.section {
+  position: relative;
+  padding: clamp(80px, 14vh, 180px) clamp(20px, 6vw, 96px);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ghost);
+  margin-bottom: 24px;
+}
+.eyebrow .accent {
+  color: var(--accent);
+  margin-right: 6px;
+}
+
+/* ── Reveal system ─────────────────────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 900ms var(--ease), transform 900ms var(--ease);
+  transition-delay: var(--delay, 0ms);
+}
+.reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-blur {
+  opacity: 0;
+  filter: blur(8px);
+  transition: opacity 900ms var(--ease), filter 900ms var(--ease);
+  transition-delay: var(--delay, 0ms);
+}
+.reveal-blur.in {
+  opacity: 1;
+  filter: blur(0);
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+.hero {
+  height: 100vh;
+  min-height: 720px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.hero-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.6;
+}
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0 24px;
+}
+.hero-mark {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(96px, 22vw, 320px);
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  position: relative;
+  display: inline-block;
+}
+.hero-mark .caret-bar {
+  display: inline-block;
+  width: 0.05em;
+  height: 0.78em;
+  background: var(--accent);
+  vertical-align: -0.05em;
+  margin-left: 0.06em;
+  border-radius: 0.02em;
+  box-shadow: 0 0 32px var(--accent-glow);
+  animation: blink 1.05s ease-in-out infinite;
+}
+.hero-mark .letter {
+  display: inline-block;
+  animation: dropIn 900ms var(--ease) both;
+  will-change: transform, opacity;
+}
+@keyframes dropIn {
+  from { opacity: 0; transform: translateY(0.4em); filter: blur(8px); }
+  to   { opacity: 1; transform: translateY(0);     filter: blur(0); }
+}
+.hero-tagline {
+  margin-top: clamp(20px, 4vh, 40px);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(18px, 2.4vw, 26px);
+  color: var(--cream);
+  letter-spacing: -0.005em;
+  max-width: 36ch;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.45;
+  animation: dropIn 900ms var(--ease) both;
+  animation-delay: 800ms;
+}
+.hero-typed {
+  margin-top: clamp(28px, 5vh, 48px);
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ghost);
+  letter-spacing: 0.02em;
+  animation: dropIn 900ms var(--ease) both;
+  animation-delay: 1100ms;
+  min-height: 1.6em;
+}
+.hero-typed .typed-text { color: var(--cream); }
+.hero-typed .typed-cursor {
+  display: inline-block;
+  width: 8px; height: 1em;
+  background: var(--accent);
+  vertical-align: -3px;
+  margin-left: 2px;
+  animation: blink 1.05s ease-in-out infinite;
+}
+
+.scroll-cue {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ghost);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: bobUp 2.2s ease-in-out infinite;
+  z-index: 2;
+}
+.scroll-cue .line {
+  width: 1px;
+  height: 36px;
+  background: linear-gradient(to bottom, transparent, var(--cream));
+}
+@keyframes bobUp {
+  0%, 100% { transform: translate(-50%, 0); opacity: 0.6; }
+  50%      { transform: translate(-50%, 6px); opacity: 1; }
+}
+
+/* ── Promise (scroll-driven letter reveal) ─────────────────────────────── */
+.promise {
+  height: 130vh;
+  position: relative;
+}
+.promise-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 0 24px;
+}
+.promise-text {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(44px, 7vw, 104px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  max-width: none;
+  color: var(--ghost);
+  position: relative;
+}
+.promise-text .word {
+  display: inline-block;
+  white-space: nowrap;
+}
+.promise-text .ch {
+  display: inline-block;
+  color: var(--ghost);
+  transition: color 300ms var(--ease);
+}
+.promise-text .ch.lit {
+  color: var(--ink);
+}
+.promise-tag {
+  margin-top: 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+
+/* ── Live demo ─────────────────────────────────────────────────────────── */
+.demo .head {
+  text-align: center;
+  margin-bottom: clamp(40px, 6vh, 64px);
+}
+.demo h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+}
+.demo .sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+
+.window {
+  position: relative;
+  margin: 0 auto;
+  max-width: 980px;
+  background: #131110;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.6),
+    0 10px 30px -10px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.03);
+  transition: transform 800ms var(--ease), box-shadow 800ms var(--ease);
+}
+.window.in {
+  transform: translateY(0);
+}
+.window-bar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to bottom, #1f1c18, #171513);
+}
+.tlight {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: #3a3530;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.3);
+}
+.tlight.r { background: #ed6a5e; }
+.tlight.y { background: #f4bf4f; }
+.tlight.g { background: #61c554; }
+.window-title {
+  flex: 1;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ghost);
+  letter-spacing: 0.04em;
+}
+.window-title .dot { color: var(--accent); margin-right: 4px; }
+.window iframe {
+  display: block;
+  width: 100%;
+  height: 540px;
+  border: 0;
+  background: #1a1815;
+}
+
+/* ── Section divider — typographic chapter break ──────────────────────── */
+.rule {
+  height: 1px;
+  width: clamp(180px, 26vw, 360px);
+  margin: clamp(40px, 6vh, 80px) auto clamp(40px, 6vh, 80px);
+  background: linear-gradient(90deg, transparent, var(--line) 50%, transparent);
+}
+.rule.dotted {
+  height: 4px;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  width: auto;
+}
+.rule.dotted::before, .rule.dotted::after, .rule.dotted span {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--ghost);
+  content: "";
+  display: block;
+}
+
+/* ── Showcase (real Plume.app screenshot) ─────────────────────────────── */
+.showcase {
+  padding-top: clamp(120px, 18vh, 220px);
+  padding-bottom: clamp(120px, 18vh, 220px);
+  position: relative;
+}
+.showcase .head { text-align: center; margin-bottom: clamp(48px, 7vh, 80px); position: relative; z-index: 1; }
+.showcase h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+}
+.showcase .sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.screenshot-wrap {
+  position: relative;
+  margin: 0 auto;
+  max-width: 1100px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-deep);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.04),
+    0 50px 120px -30px rgba(0, 0, 0, 0.7),
+    0 18px 40px -10px rgba(0, 0, 0, 0.5),
+    0 0 0 1px var(--line);
+  z-index: 1;
+}
+.screenshot-wrap img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.showcase::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 70%;
+  height: 60%;
+  background: radial-gradient(ellipse at center, rgba(121, 184, 255, 0.10), transparent 65%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Manifesto (parallax quotes) ───────────────────────────────────────── */
+.manifesto {
+  padding-top: clamp(120px, 20vh, 240px);
+  padding-bottom: clamp(120px, 20vh, 240px);
+}
+.quote {
+  margin: 0 auto;
+  max-width: 28ch;
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(34px, 5.6vw, 76px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-align: center;
+  padding: clamp(120px, 22vh, 220px) 0;
+  position: relative;
+  color: var(--ink);
+}
+.quote::before {
+  content: attr(data-num);
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: var(--ghost);
+  text-transform: uppercase;
+}
+.quote .accent { color: var(--accent); font-style: italic; }
+
+/* ── Stats ─────────────────────────────────────────────────────────────── */
+.stats {
+  padding: clamp(80px, 14vh, 160px) clamp(20px, 6vw, 96px);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(48px, 7vw, 80px) clamp(24px, 4vw, 56px);
+  text-align: left;
+}
+@media (max-width: 900px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
+.stat .num {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(56px, 8vw, 110px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.stat .num .unit {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 0.32em;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+.stat .label {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.stat .desc {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--cream);
+  max-width: 28ch;
+  line-height: 1.55;
+}
+
+/* ── Download ──────────────────────────────────────────────────────────── */
+.download {
+  padding: clamp(120px, 20vh, 220px) clamp(20px, 6vw, 96px) clamp(80px, 14vh, 140px);
+  max-width: 980px;
+  margin: 0 auto;
+  text-align: center;
+}
+.download h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(48px, 7vw, 96px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 20px;
+}
+.download p.lead {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(18px, 2.2vw, 22px);
+  color: var(--cream);
+  margin-bottom: clamp(40px, 6vh, 60px);
+  max-width: 40ch;
+  margin-left: auto; margin-right: auto;
+}
+.cta-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+}
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 32px;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  transition: all 280ms var(--ease);
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+.btn-primary {
+  background: linear-gradient(180deg, var(--accent), #5a96e0);
+  color: #0a0d12;
+  box-shadow:
+    0 0 0 0 var(--accent-glow),
+    0 12px 30px -8px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 6px var(--accent-soft),
+    0 18px 40px -8px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.5) 50%, transparent 70%);
+  transform: translateX(-100%);
+  transition: transform 800ms var(--ease);
+}
+.btn-primary:hover::after {
+  transform: translateX(100%);
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+}
+.btn-secondary:hover {
+  border-color: var(--cream);
+  background: rgba(232, 228, 216, 0.04);
+}
+.btn .arrow {
+  transition: transform 280ms var(--ease);
+}
+.btn:hover .arrow { transform: translateX(3px); }
+
+.specs {
+  margin-top: clamp(40px, 6vh, 56px);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.specs span:not(:last-child)::after {
+  content: " · ";
+  color: var(--line);
+  margin: 0 6px;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+.footer {
+  border-top: 1px solid var(--line);
+  padding: 48px clamp(20px, 6vw, 96px);
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ghost);
+  letter-spacing: 0.04em;
+}
+.footer .footer-mark {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 16px;
+  color: var(--cream);
+  letter-spacing: -0.01em;
+}
+.footer a { color: var(--cream); transition: color 200ms var(--ease); }
+.footer a:hover { color: var(--accent); }
+.footer-links { display: flex; gap: 24px; }
+
+/* ── Responsive tweaks ─────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .nav-links a:not(.cta) { display: none; }
+  .window iframe { height: 480px; }
+  .stats-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal, .reveal-blur { opacity: 1 !important; transform: none !important; filter: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="scroll-progress" id="progress"></div>
+
+<nav class="nav" id="nav">
+  <a href="#" class="nav-brand">plume<span class="dot"></span></a>
+  <div class="nav-links">
+    <a href="#manifesto">Manifesto</a>
+    <a href="https://github.com/zabrodsk/plume" target="_blank" rel="noopener">GitHub</a>
+    <a href="#download" class="cta">Download</a>
+  </div>
+</nav>
+
+<!-- ───────────── Hero ───────────── -->
+<section class="hero">
+  <canvas class="hero-canvas" id="heroCanvas"></canvas>
+  <div class="hero-inner">
+    <h1 class="hero-mark" id="heroMark">
+      <span class="letter" style="animation-delay: 0ms">p</span><span class="letter" style="animation-delay: 80ms">l</span><span class="letter" style="animation-delay: 160ms">u</span><span class="letter" style="animation-delay: 240ms">m</span><span class="letter" style="animation-delay: 320ms">e</span><span class="caret-bar"></span>
+    </h1>
+    <p class="hero-tagline">
+      A markdown editor for the satisfaction of typing.
+    </p>
+    <p class="hero-typed">
+      <span class="typed-text" id="typed"></span><span class="typed-cursor"></span>
+    </p>
+  </div>
+  <a href="#promise" class="scroll-cue">
+    <span>scroll</span>
+    <span class="line"></span>
+  </a>
+</section>
+
+<!-- ───────────── Promise ───────────── -->
+<section class="promise" id="promise">
+  <div class="promise-sticky">
+    <div>
+      <div class="promise-tag reveal">— the idea</div>
+      <h2 class="promise-text" id="promiseText" aria-label="Every letter blooms.">
+        <span class="word"><span class="ch">E</span><span class="ch">v</span><span class="ch">e</span><span class="ch">r</span><span class="ch">y</span></span>
+        <span class="word"><span class="ch">l</span><span class="ch">e</span><span class="ch">t</span><span class="ch">t</span><span class="ch">e</span><span class="ch">r</span></span><br>
+        <span class="word"><span class="ch">b</span><span class="ch">l</span><span class="ch">o</span><span class="ch">o</span><span class="ch">m</span><span class="ch">s</span><span class="ch">.</span></span>
+      </h2>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Live demo ───────────── -->
+<section class="section demo" id="demo">
+  <div class="head">
+    <div class="eyebrow reveal"><span class="accent">02 ·</span> try it now</div>
+    <h2 class="reveal">Type something below.</h2>
+    <p class="sub reveal">live · interactive · in your browser</p>
+  </div>
+  <div class="window reveal" id="demoWindow">
+    <div class="window-bar">
+      <span class="tlight r"></span><span class="tlight y"></span><span class="tlight g"></span>
+      <span class="window-title"><span class="dot">●</span>Untitled.md</span>
+    </div>
+    <iframe src="editor.html" loading="lazy" title="Plume editor"></iframe>
+  </div>
+</section>
+
+<div class="rule dotted" aria-hidden="true"><span></span></div>
+
+<!-- ───────────── Showcase (real Plume.app screenshot) ───────────── -->
+<section class="section showcase" id="showcase">
+  <div class="head">
+    <div class="eyebrow reveal"><span class="accent">03 ·</span> in your dock</div>
+    <h2 class="reveal">A real native Mac app.</h2>
+    <p class="sub reveal">universal binary &middot; ~ 200 KB &middot; zero runtime dependencies</p>
+  </div>
+  <div class="screenshot-wrap reveal">
+    <img src="plume-shot.png"
+         alt="Plume.app showing sample text in a dark warm window"
+         width="1760" height="1440"
+         loading="lazy" />
+  </div>
+</section>
+
+<!-- ───────────── Manifesto ───────────── -->
+<section class="section manifesto" id="manifesto">
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">04 ·</span> the manifesto</div>
+
+  <p class="quote reveal-blur" data-num="i">
+    Writing should not feel like <span class="accent">fighting</span> your tools.
+  </p>
+
+  <p class="quote reveal-blur" data-num="ii">
+    What you focus on grows.<br>So we let you <span class="accent">focus</span>.
+  </p>
+
+  <p class="quote reveal-blur" data-num="iii">
+    Less app.<br><span class="accent">More page.</span>
+  </p>
+</section>
+
+<!-- ───────────── Stats ───────────── -->
+<section class="section stats" id="stats">
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">05 ·</span>&nbsp;the numbers</div>
+  <div class="stats-grid">
+    <div class="stat reveal" style="--delay: 0ms">
+      <div class="num"><span data-counter="90">0</span><span class="unit">ms</span></div>
+      <div class="label">Letter entrance</div>
+      <div class="desc">Keystroke to fully-rendered character. Below the threshold of perceived lag.</div>
+    </div>
+    <div class="stat reveal" style="--delay: 80ms">
+      <div class="num"><span data-counter="200">0</span><span class="unit">KB</span></div>
+      <div class="label">Binary size</div>
+      <div class="desc">Universal Mac binary. The Slack icon weighs more than the whole app.</div>
+    </div>
+    <div class="stat reveal" style="--delay: 160ms">
+      <div class="num"><span data-counter="2">0</span><span class="unit">files</span></div>
+      <div class="label">Source surface</div>
+      <div class="desc">One <code>main.swift</code>, one <code>index.html</code>. Read every line at lunch.</div>
+    </div>
+    <div class="stat reveal" style="--delay: 240ms">
+      <div class="num"><span data-counter="0">0</span></div>
+      <div class="label">Dependencies</div>
+      <div class="desc">No Electron. No Node. No bundler. Just Apple frameworks.</div>
+    </div>
+    <div class="stat reveal" style="--delay: 320ms">
+      <div class="num"><span data-counter="12">0</span><span class="unit">+ macOS</span></div>
+      <div class="label">Reach</div>
+      <div class="desc">Runs on every Mac sold since 2012. Apple Silicon and Intel, one binary.</div>
+    </div>
+    <div class="stat reveal" style="--delay: 400ms">
+      <div class="num"><span data-counter="100">0</span><span class="unit">% open</span></div>
+      <div class="label">MIT licensed</div>
+      <div class="desc">Fork it. Rebrand it. Ship your own. No telemetry, no account.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Download ───────────── -->
+<section class="download" id="download">
+  <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">06 ·</span>&nbsp;take it home</div>
+  <h2 class="reveal">It's yours.</h2>
+  <p class="lead reveal">A single drag into <span class="hl">/Applications</span>. That's the install.</p>
+  <div class="cta-row reveal">
+    <a class="btn btn-primary" href="https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip">
+      Download for macOS
+      <span class="arrow">→</span>
+    </a>
+    <a class="btn btn-secondary" href="https://github.com/zabrodsk/plume" target="_blank" rel="noopener">
+      View on GitHub
+      <span class="arrow">↗</span>
+    </a>
+  </div>
+  <div class="specs">
+    <span>macOS 12+</span><span>Universal Binary</span><span>~ 200 KB</span><span>Free · MIT</span>
+  </div>
+</section>
+
+<!-- ───────────── Footer ───────────── -->
+<footer class="footer">
+  <span class="footer-mark">plume</span>
+  <div class="footer-links">
+    <a href="https://github.com/zabrodsk/plume" target="_blank" rel="noopener">Source</a>
+    <a href="https://github.com/zabrodsk/plume/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="#download">Download</a>
+  </div>
+  <span>made with care · MIT 2026</span>
+</footer>
+
+<script>
+/* ── Scroll progress ─────────────────────────────────────────────────── */
+const $progress = document.getElementById('progress');
+const $nav = document.getElementById('nav');
+function onScroll() {
+  const h = document.documentElement;
+  const max = h.scrollHeight - h.clientHeight;
+  const pct = max > 0 ? (h.scrollTop / max) * 100 : 0;
+  $progress.style.setProperty('--scroll', pct + '%');
+  if (h.scrollTop > 40) $nav.classList.add('solid');
+  else $nav.classList.remove('solid');
+  updatePromise();
+}
+window.addEventListener('scroll', () => requestAnimationFrame(onScroll), { passive: true });
+
+/* ── Reveal on enter ─────────────────────────────────────────────────── */
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (e.isIntersecting) {
+      e.target.classList.add('in');
+      if (e.target.dataset.once === '1') io.unobserve(e.target);
+    }
+  }
+}, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+
+document.querySelectorAll('.reveal, .reveal-blur, .window').forEach(el => {
+  el.dataset.once = '1';
+  io.observe(el);
+});
+
+/* ── Hero typed text ─────────────────────────────────────────────────── */
+const phrases = [
+  'a place where letters bloom.',
+  'one keystroke at a time.',
+  'just text. just feel.',
+  'and the page is yours.'
+];
+const $typed = document.getElementById('typed');
+let phraseIdx = 0, charIdx = 0, deleting = false;
+function tick() {
+  const phrase = phrases[phraseIdx];
+  if (!deleting) {
+    charIdx++;
+    $typed.textContent = phrase.slice(0, charIdx);
+    if (charIdx >= phrase.length) {
+      deleting = true;
+      setTimeout(tick, 1800);
+      return;
+    }
+    setTimeout(tick, 55 + Math.random() * 60);
+  } else {
+    charIdx--;
+    $typed.textContent = phrase.slice(0, charIdx);
+    if (charIdx <= 0) {
+      deleting = false;
+      phraseIdx = (phraseIdx + 1) % phrases.length;
+      setTimeout(tick, 360);
+      return;
+    }
+    setTimeout(tick, 22 + Math.random() * 22);
+  }
+}
+setTimeout(tick, 1700);
+
+/* ── Hero ambient particles ──────────────────────────────────────────── */
+(function ambient() {
+  const c = document.getElementById('heroCanvas');
+  const ctx = c.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w, h, parts = [];
+
+  function size() {
+    const rect = c.getBoundingClientRect();
+    w = rect.width; h = rect.height;
+    c.width = w * dpr; c.height = h * dpr;
+    ctx.scale(dpr, dpr);
+  }
+  function init() {
+    size();
+    parts = [];
+    const count = Math.floor((w * h) / 14000);
+    for (let i = 0; i < count; i++) {
+      parts.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: Math.random() * 1.4 + 0.3,
+        vy: -0.15 - Math.random() * 0.25,
+        vx: (Math.random() - 0.5) * 0.05,
+        a: Math.random() * 0.5 + 0.1,
+        twinkle: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of parts) {
+      p.y += p.vy; p.x += p.vx;
+      p.twinkle += 0.018;
+      if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+      const a = p.a * (0.6 + 0.4 * Math.sin(p.twinkle));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#d4cfc0';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+  window.addEventListener('resize', init);
+  init();
+  draw();
+})();
+
+/* ── Promise: scroll-driven letter reveal ─────────────────────────────── */
+const $promise = document.getElementById('promise');
+const $promiseText = document.getElementById('promiseText');
+const promiseChars = $promiseText.querySelectorAll('.ch');
+function updatePromise() {
+  const rect = $promise.getBoundingClientRect();
+  const total = rect.height - window.innerHeight;
+  if (total <= 0) return;
+  let progress = -rect.top / total;
+  progress = Math.max(0, Math.min(1, progress));
+  // Reveal happens between 0% and 45% of section progress — earlier start,
+  // earlier finish, so the user sees the *finished* state for the rest of the scroll.
+  const eased = Math.max(0, Math.min(1, progress / 0.45));
+  const litCount = Math.round(eased * promiseChars.length);
+  promiseChars.forEach((el, i) => {
+    if (i < litCount) el.classList.add('lit');
+    else el.classList.remove('lit');
+  });
+}
+
+/* ── Animated counters ───────────────────────────────────────────────── */
+const counterIO = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    const el = e.target;
+    const target = parseInt(el.dataset.counter, 10);
+    const start = performance.now();
+    const dur = 1400;
+    function step(t) {
+      const p = Math.min(1, (t - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased);
+      if (p < 1) requestAnimationFrame(step);
+      else el.textContent = target;
+    }
+    requestAnimationFrame(step);
+    counterIO.unobserve(el);
+  }
+}, { threshold: 0.4 });
+document.querySelectorAll('[data-counter]').forEach(el => counterIO.observe(el));
+
+/* ── Initial paint ───────────────────────────────────────────────────── */
+onScroll();
+</script>
+</body>
+</html>
