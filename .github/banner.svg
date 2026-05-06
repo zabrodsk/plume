@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Plume — a markdown editor for the satisfaction of typing">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#79b8ff" stop-opacity="0.14"/>
+      <stop offset="55%" stop-color="#79b8ff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#79b8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="warm" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#2a2520" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#1a1815" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Layered background — dark warm with subtle warm vignette + cool center glow -->
+  <rect width="1600" height="500" fill="#1a1815"/>
+  <rect width="1600" height="500" fill="url(#warm)"/>
+  <rect width="1600" height="500" fill="url(#glow)"/>
+
+  <!-- Tiny ambient particles (floating up slowly) -->
+  <g fill="#d4cfc0">
+    <circle cx="180" cy="380" r="1.6" opacity="0.4">
+      <animate attributeName="cy" from="380" to="80" dur="9s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.5;0" dur="9s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="320" cy="420" r="1.2" opacity="0.3">
+      <animate attributeName="cy" from="420" to="60" dur="11s" repeatCount="indefinite" begin="-3s"/>
+      <animate attributeName="opacity" values="0;0.45;0" dur="11s" repeatCount="indefinite" begin="-3s"/>
+    </circle>
+    <circle cx="1280" cy="400" r="1.4" opacity="0.35">
+      <animate attributeName="cy" from="400" to="60" dur="10s" repeatCount="indefinite" begin="-1.5s"/>
+      <animate attributeName="opacity" values="0;0.5;0" dur="10s" repeatCount="indefinite" begin="-1.5s"/>
+    </circle>
+    <circle cx="1420" cy="440" r="1" opacity="0.25">
+      <animate attributeName="cy" from="440" to="80" dur="13s" repeatCount="indefinite" begin="-5s"/>
+      <animate attributeName="opacity" values="0;0.4;0" dur="13s" repeatCount="indefinite" begin="-5s"/>
+    </circle>
+  </g>
+
+  <!-- "plume" word — each letter staggers in with a soft upward + opacity fade -->
+  <g font-family="ui-serif, 'New York', 'Hoefler Text', Georgia, 'Times New Roman', serif"
+     font-style="italic" font-weight="400" font-size="280" fill="#e8e4d8"
+     text-anchor="middle" letter-spacing="-12">
+    <text x="800" y="295">
+      <tspan opacity="0">
+        <animate attributeName="opacity" from="0" to="1" begin="0.05s" dur="0.7s" fill="freeze"/>p</tspan><tspan opacity="0">
+        <animate attributeName="opacity" from="0" to="1" begin="0.18s" dur="0.7s" fill="freeze"/>l</tspan><tspan opacity="0">
+        <animate attributeName="opacity" from="0" to="1" begin="0.31s" dur="0.7s" fill="freeze"/>u</tspan><tspan opacity="0">
+        <animate attributeName="opacity" from="0" to="1" begin="0.44s" dur="0.7s" fill="freeze"/>m</tspan><tspan opacity="0">
+        <animate attributeName="opacity" from="0" to="1" begin="0.57s" dur="0.7s" fill="freeze"/>e</tspan>
+    </text>
+  </g>
+
+  <!-- Blinking blue caret right after "plume" -->
+  <rect x="942" y="124" width="10" height="184" rx="3" fill="#79b8ff" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.7s" dur="0.3s" fill="freeze"/>
+    <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.45;0.5;0.95;1" dur="1.05s" repeatCount="indefinite" begin="1.1s"/>
+  </rect>
+
+  <!-- Tagline -->
+  <text x="800" y="385"
+        font-family="ui-serif, 'New York', Georgia, serif"
+        font-style="italic" font-size="34" fill="#d4cfc0"
+        text-anchor="middle" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="1.0s" dur="0.7s" fill="freeze"/>
+    A markdown editor for the satisfaction of typing.
+  </text>
+
+  <!-- Mono sub-line -->
+  <text x="800" y="430"
+        font-family="ui-monospace, 'JetBrains Mono', Menlo, monospace"
+        font-size="14" fill="#6a655c" letter-spacing="3"
+        text-anchor="middle" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="1.4s" dur="0.6s" fill="freeze"/>
+    UNIVERSAL MAC BINARY  ·  ~ 200 KB  ·  MIT
+  </text>
+</svg>

@@ -1,14 +1,54 @@
-# Plume
+<div align="center">
 
-A minimalist Markdown editor for macOS where every letter blooms onto the page.
+<img src=".github/banner.svg" alt="Plume — a markdown editor for the satisfaction of typing" width="100%">
 
-The point of Plume is the *feel* of typing. Each character enters with a 90 ms
-opacity rise; the rest of the app gets out of the way. Dark, focused, small.
+<br>
 
-→ **[Live demo](https://plume-md.pages.dev)**
-→ **[Download for macOS](https://github.com/zabrodsk/plume/releases/latest)**
+[![Latest release](https://img.shields.io/github/v/release/zabrodsk/plume?style=flat-square&color=79b8ff&labelColor=1a1815)](https://github.com/zabrodsk/plume/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-12%2B-d4cfc0?style=flat-square&labelColor=1a1815)](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip)
+[![License: MIT](https://img.shields.io/github/license/zabrodsk/plume?style=flat-square&color=d4cfc0&labelColor=1a1815)](LICENSE)
+[![Live demo](https://img.shields.io/badge/live%20demo-plume--md.pages.dev-79b8ff?style=flat-square&labelColor=1a1815)](https://plume-md.pages.dev)
 
-## Build from source
+<br>
+
+### [↓ Download for macOS](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) &nbsp;·&nbsp; [▶ Try it live](https://plume-md.pages.dev)
+
+</div>
+
+<br>
+
+> *Writing should not feel like fighting your tools.*
+>
+> *What you focus on grows. So we let you focus.*
+>
+> *Less app. More page.*
+
+<br>
+
+<div align="center">
+
+<img src="docs/plume-shot.png" alt="Plume showing sample text in a dark warm window" width="80%">
+
+</div>
+
+<br>
+
+## How it feels
+
+| | | |
+|:---:|:---:|:---:|
+| **90 ms** | **0** | **2 files** |
+| Letter entrance | Runtime dependencies | Source surface |
+| **~200 KB** | **12+** | **100 %** |
+| Universal binary | macOS supported | Open source · MIT |
+
+<br>
+
+## Install
+
+**Pre-built** &nbsp;→&nbsp; download [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip), unzip, drag `Plume.app` to `/Applications`. First launch: right-click → *Open* (Gatekeeper, one-time).
+
+**From source** &nbsp;→&nbsp;
 
 ```bash
 git clone https://github.com/zabrodsk/plume.git
@@ -19,19 +59,48 @@ open Plume.app
 
 Requires macOS 12+ and the Swift toolchain (`xcode-select --install`).
 
+<br>
+
 ## What's inside
 
 ```
 src/
-  main.swift      Cocoa shell — window, menu, file I/O, JS bridge
-  index.html      The editor (dark mode, runs inside WKWebView)
-  icon.swift      Generates AppIcon.icns
-  Info.plist      Bundle metadata
-  build.sh        swiftc → lipo → iconutil → bundle → sign
-demo/
-  index.html      The marketing landing page (also the editor demo)
+  main.swift     Cocoa shell — window, menu, file I/O, JS bridge
+  index.html     Editor (dark mode), runs inside WKWebView
+  icon.swift     Generates AppIcon.icns
+  Info.plist     Bundle metadata
+  build.sh       swiftc → lipo → iconutil → bundle → ad-hoc sign
+docs/
+  index.html     Marketing landing page (the live demo)
+  editor.html    Editor, web-embedded variant
+.github/
+  banner.svg     The hero you saw above
 ```
+
+Two files of source. Read them at lunch.
+
+<br>
+
+## Why it feels different
+
+Most editors render typed text instantly with a hard pixel pop. Plume's editor wraps the freshly-typed character in a `<span>` that animates from `opacity: 0.4` to `opacity: 1` over 90&nbsp;milliseconds, then merges back into a single text node when you stop typing. The result: every keystroke *blooms* onto the page, but the DOM stays clean and scrolling stays free even at 100&nbsp;KB documents.
+
+Behind the scenes:
+
+- **Cocoa + WKWebView** — the chrome is native (NSWindow, NSMenu, file panels); the editor is HTML/CSS/JS inside a web view. Best of both: native menus and shortcuts, web-grade animation precision.
+- **Stable-text model** — incremental input diffing means each keystroke only mutates one DOM node. Paste 10&nbsp;KB and the render layer is still a single text node 140&nbsp;ms later.
+- **Universal binary** — one `Plume.app`, runs natively on every Mac sold since 2012 (Apple Silicon and Intel).
+
+<br>
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). No telemetry. No account. No analytics. No friction.
+
+<br>
+
+<div align="center">
+
+*Made with care.*
+
+</div>
