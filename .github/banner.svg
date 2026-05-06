@@ -50,25 +50,25 @@
     </text>
   </g>
 
-  <!-- Blinking blue caret right after "plume" -->
-  <rect x="942" y="124" width="10" height="184" rx="3" fill="#79b8ff" opacity="0">
-    <animate attributeName="opacity" from="0" to="1" begin="0.7s" dur="0.3s" fill="freeze"/>
-    <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.45;0.5;0.95;1" dur="1.05s" repeatCount="indefinite" begin="1.1s"/>
+  <!-- Blinking blue caret right after "plume" — measured to land after the "e" -->
+  <rect x="1230" y="118" width="10" height="190" rx="3" fill="#79b8ff" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.78s" dur="0.3s" fill="freeze"/>
+    <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.45;0.5;0.95;1" dur="1.05s" repeatCount="indefinite" begin="1.18s"/>
   </rect>
 
-  <!-- Tagline -->
-  <text x="800" y="385"
+  <!-- Tagline (pushed down to clear the descender of "p") -->
+  <text x="800" y="410"
         font-family="ui-serif, 'New York', Georgia, serif"
-        font-style="italic" font-size="34" fill="#d4cfc0"
+        font-style="italic" font-size="32" fill="#d4cfc0"
         text-anchor="middle" opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="1.0s" dur="0.7s" fill="freeze"/>
     A markdown editor for the satisfaction of typing.
   </text>
 
   <!-- Mono sub-line -->
-  <text x="800" y="430"
+  <text x="800" y="455"
         font-family="ui-monospace, 'JetBrains Mono', Menlo, monospace"
-        font-size="14" fill="#6a655c" letter-spacing="3"
+        font-size="13" fill="#6a655c" letter-spacing="3"
         text-anchor="middle" opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="1.4s" dur="0.6s" fill="freeze"/>
     UNIVERSAL MAC BINARY  ·  ~ 200 KB  ·  MIT
