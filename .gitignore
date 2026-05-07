@@ -4,6 +4,11 @@ src/AppIcon.iconset/
 src/AppIcon.icns
 src/*.dSYM/
 
+# Release artifacts (dist/release.sh outputs)
+dist/Plume.dmg
+dist/Plume.zip
+dist/dmg-staging/
+
 # macOS
 .DS_Store
 

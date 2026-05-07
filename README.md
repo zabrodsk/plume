@@ -5,13 +5,13 @@
 <br>
 
 [![Latest release](https://img.shields.io/github/v/release/zabrodsk/plume?style=flat-square&color=79b8ff&labelColor=1a1815)](https://github.com/zabrodsk/plume/releases/latest)
-[![macOS](https://img.shields.io/badge/macOS-12%2B-d4cfc0?style=flat-square&labelColor=1a1815)](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip)
+[![macOS](https://img.shields.io/badge/macOS-12%2B-d4cfc0?style=flat-square&labelColor=1a1815)](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg)
 [![License: MIT](https://img.shields.io/github/license/zabrodsk/plume?style=flat-square&color=d4cfc0&labelColor=1a1815)](LICENSE)
 [![Live demo](https://img.shields.io/badge/live%20demo-plume--md.pages.dev-79b8ff?style=flat-square&labelColor=1a1815)](https://plume-md.pages.dev)
 
 <br>
 
-### [↓ Download for macOS](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) &nbsp;·&nbsp; [▶ Try it live](https://plume-md.pages.dev)
+### [↓ Download for macOS](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg) &nbsp;·&nbsp; [▶ Try it live](https://plume-md.pages.dev)
 
 </div>
 
@@ -39,14 +39,14 @@
 |:---:|:---:|:---:|
 | **90 ms** | **0** | **2 files** |
 | Letter entrance | Runtime dependencies | Source surface |
-| **~200 KB** | **12+** | **100 %** |
+| **<400 KB** | **12+** | **100 %** |
 | Universal binary | macOS supported | Open source · MIT |
 
 <br>
 
 ## Install
 
-**Pre-built** &nbsp;→&nbsp; download [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip), unzip, drag `Plume.app` to `/Applications`. First launch: right-click → *Open* (Gatekeeper, one-time).
+**Pre-built** &nbsp;→&nbsp; download [`Plume.dmg`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg), drag `Plume.app` to `/Applications`. Notarized — opens with one click, no Gatekeeper warning. (Or grab [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) — same app, right-click → *Open* on first launch.)
 
 **From source** &nbsp;→&nbsp;
 
@@ -65,16 +65,19 @@ Requires macOS 12+ and the Swift toolchain (`xcode-select --install`).
 
 ```
 src/
-  main.swift     Cocoa shell — window, menu, file I/O, JS bridge
+  main.swift     Cocoa shell — window, menu, file I/O (incl. SSH), JS bridge
   index.html     Editor (dark mode), runs inside WKWebView
   icon.swift     Generates AppIcon.icns
   Info.plist     Bundle metadata
   build.sh       swiftc → lipo → iconutil → bundle → ad-hoc sign
+dist/
+  release.sh     Developer ID re-sign → DMG → notarize → staple
 docs/
   index.html     Marketing landing page (the live demo)
   editor.html    Editor, web-embedded variant
 .github/
   banner.svg     The hero you saw above
+ROADMAP.md       v2 design notes — SSH and what stays out of scope
 ```
 
 Two files of source. Read them at lunch.
@@ -89,6 +92,7 @@ Behind the scenes:
 
 - **Cocoa + WKWebView** — the chrome is native (NSWindow, NSMenu, file panels); the editor is HTML/CSS/JS inside a web view. Best of both: native menus and shortcuts, web-grade animation precision.
 - **Stable-text model** — incremental input diffing means each keystroke only mutates one DOM node. Paste 10&nbsp;KB and the render layer is still a single text node 140&nbsp;ms later.
+- **Edit anywhere** — `File → Open via SSH…` (⌥⌘O) opens remote files over SSH using your existing keys and `~/.ssh/config`. Atomic writes, zero new auth surface, zero bundled dependencies.
 - **Universal binary** — one `Plume.app`, runs natively on every Mac sold since 2012 (Apple Silicon and Intel).
 
 <br>
