@@ -194,14 +194,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             alert.addButton(withTitle: "Open")
             alert.addButton(withTitle: "Cancel")
 
-            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-            field.placeholderString = "user@host:/path/to/file.md"
-            alert.accessoryView = field
-            alert.window.initialFirstResponder = field
+            let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            combo.placeholderString = "user@host:/path/to/file.md"
+            combo.completes = true
+            combo.usesDataSource = false
+            combo.addItems(withObjectValues: SSHConfig.hostAliases())
+            alert.accessoryView = combo
+            alert.window.initialFirstResponder = combo
 
             alert.beginSheetModal(for: self.window) { response in
                 guard response == .alertFirstButtonReturn else { return }
-                let raw = field.stringValue
+                let raw = combo.stringValue
                 guard let remote = SSHPath.parse(raw) else {
                     self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
                     return

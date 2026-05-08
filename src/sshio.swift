@@ -163,3 +163,38 @@ enum SSHIO {
         return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
+
+// MARK: - SSH config parser
+
+/// Parses ~/.ssh/config for Host aliases useful as autocomplete candidates.
+enum SSHConfig {
+    /// Parse ~/.ssh/config and return literal Host aliases (no glob patterns).
+    /// Returns [] if the file is missing or unreadable. Sorted, de-duplicated.
+    static func hostAliases() -> [String] {
+        let configURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/config")
+        guard let raw = try? String(contentsOf: configURL, encoding: .utf8) else { return [] }
+
+        var seen = Set<String>()
+        for line in raw.components(separatedBy: .newlines) {
+            // Strip inline comments and trim.
+            let stripped = line.components(separatedBy: "#").first ?? ""
+            let trimmed = stripped.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            // Accept both `Host foo` (whitespace) and `Host=foo` (equals) forms.
+            let normalized = trimmed.replacingOccurrences(of: "=", with: " ")
+            var tokens = normalized.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            guard tokens.count >= 2,
+                  tokens[0].lowercased() == "host" else { continue }
+            tokens.removeFirst()
+
+            for token in tokens {
+                // Skip glob patterns and negations — useless for autocomplete.
+                guard !token.contains("*"), !token.contains("?"), !token.hasPrefix("!") else { continue }
+                seen.insert(token)
+            }
+        }
+        return seen.sorted { $0.lowercased() < $1.lowercased() }
+    }
+}
