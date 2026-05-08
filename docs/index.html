@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Plume — A Markdown editor for the satisfaction of typing</title>
-<meta name="description" content="Plume is a minimalist Markdown editor for macOS where every letter blooms onto the page. Dark by default. Built for focus.">
+<meta name="description" content="Plume is a minimalist Markdown editor for macOS where every letter blooms onto the page. Edit local and SSH files, then update in-app with Sparkle.">
 <meta property="og:title" content="Plume — A Markdown editor for the satisfaction of typing">
-<meta property="og:description" content="Every letter blooms. Dark by default. Built for focus.">
+<meta property="og:description" content="Every letter blooms. Local files, SSH files, and in-app updates.">
 <meta name="theme-color" content="#1a1815">
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231a1815'/><text x='50' y='78' font-family='Times' font-style='italic' font-size='80' fill='%23e8e4d8' text-anchor='middle'>p</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -733,7 +733,7 @@ a { color: inherit; text-decoration: none; }
 .footer a:hover { color: var(--accent); }
 .footer-links { display: flex; gap: 24px; }
 
-/* ── What's new (v2.5) ─────────────────────────────────────────────────── */
+/* ── What's new (v2.7) ─────────────────────────────────────────────────── */
 .whats-new {
   padding-top: clamp(120px, 18vh, 220px);
   padding-bottom: clamp(80px, 12vh, 140px);
@@ -986,7 +986,7 @@ a { color: inherit; text-decoration: none; }
   <div class="head">
     <div class="eyebrow reveal"><span class="accent">03 ·</span> in your dock</div>
     <h2 class="reveal">A real native Mac app.</h2>
-    <p class="sub reveal">universal binary &middot; notarized &middot; zero runtime dependencies</p>
+    <p class="sub reveal">universal binary &middot; notarized &middot; self-updating</p>
   </div>
   <div class="screenshot-wrap reveal">
     <img src="plume-shot.png"
@@ -1005,46 +1005,46 @@ a { color: inherit; text-decoration: none; }
   </div>
   <div class="path-card reveal">
     <span class="kbd">⌥⌘O</span>
-    <span class="path"><span class="g">▸</span><span class="user">dusan</span><span class="at">@</span><span class="host">server</span><span class="colon">:</span><span class="dir">/var/www/notes</span><span class="slash">/</span><span class="file">today.md</span></span>
+    <span class="path"><span class="g">▸</span><span class="user">dusan</span><span class="at">@</span><span class="host">server</span><span class="colon">:</span><span class="dir">/var/www/.openclaw</span><span class="slash">/</span><span class="file">plan.md</span></span>
   </div>
   <p class="anywhere-copy reveal">
-    Local folder, remote server, same keystroke. Plume reads your existing
-    <code>~/.ssh/config</code> &mdash; your keys, your hosts, no new auth surface.
+    Local folder, remote server, same page. Plume reads your existing
+    <code>~/.ssh/config</code> &mdash; your keys, your hosts, no new account.
   </p>
   <p class="anywhere-copy reveal" style="margin-top: clamp(20px, 3vh, 32px); font-size: clamp(15px, 1.6vw, 18px); color: var(--ghost);">
-    <span style="color: var(--cream);">v2.5</span> &middot; pick a host and Plume browses the directory. Click a <code>.md</code>, edit, save back over SSH.
+    <span style="color: var(--cream);">v2.7</span> &middot; pick a host and Plume browses the directory, including hidden folders like <code>.openclaw</code> and <code>.hermes</code>. Click a <code>.md</code>, edit, save back over SSH.
   </p>
 </section>
 
 <div class="rule" aria-hidden="true"></div>
 
-<!-- ───────────── What's new in v2.5 ───────────── -->
+<!-- ───────────── What's new in v2.7 ───────────── -->
 <section class="section whats-new" id="whats-new">
   <div class="head">
-    <div class="eyebrow reveal"><span class="accent">05 ·</span> what's new in v2.5</div>
-    <h2 class="reveal">A deeper page.</h2>
-    <p class="sub reveal">same brand &middot; less app &middot; more page</p>
+    <div class="eyebrow reveal"><span class="accent">05 ·</span> what's new in v2.7</div>
+    <h2 class="reveal">Update without leaving.</h2>
+    <p class="sub reveal">sparkle updates &middot; ssh folders &middot; same page</p>
   </div>
   <div class="whats-new-grid">
     <div class="whats-new-card reveal" style="--delay: 0ms">
-      <span class="kbd">⌥⌘O</span>
-      <h3>Browse remote files</h3>
-      <p>Pick a host, see what's there, click to open. Read your <code>~/.ssh/config</code>; <code>ControlMaster</code> sockets make subsequent saves feel local. <code>Esc</code> cancels a hung read.</p>
+      <span class="kbd">Update</span>
+      <h3>Self-updating</h3>
+      <p>Install once, then use <code>Plume → Check for Updates…</code>. Sparkle verifies the signed appcast and installs future releases from inside the app.</p>
     </div>
     <div class="whats-new-card reveal" style="--delay: 80ms">
-      <span class="kbd">⌘F</span>
-      <h3>Find in page</h3>
-      <p>A search bar drops in from the top. <code>↵</code> next, <code>⇧↵</code> previous, <code>Esc</code> dismisses. Fenced code blocks color in six languages — <code>swift</code>, <code>js</code>, <code>py</code>, <code>sh</code>, <code>html</code>, <code>css</code>.</p>
+      <span class="kbd">⌥⌘O</span>
+      <h3>Hidden SSH folders</h3>
+      <p>The SSH browser now shows dot-directories such as <code>.openclaw</code>, <code>.hermes</code>, <code>.config</code>, and <code>.ssh</code>. Hidden files stay hidden.</p>
     </div>
     <div class="whats-new-card reveal" style="--delay: 160ms">
-      <span class="kbd">☀︎</span>
-      <h3>Light theme</h3>
-      <p>Plume now follows your system appearance. Cream-warm dark stays the default; cream-white light arrives if your Mac is set that way. No menu toggle, no preference — system-following only.</p>
+      <span class="kbd">host</span>
+      <h3>Browse remote files</h3>
+      <p>Pick a host, see what's there, click to open. Plume reads your <code>~/.ssh/config</code>; <code>ControlMaster</code> sockets make subsequent saves feel local.</p>
     </div>
     <div class="whats-new-card reveal" style="--delay: 240ms">
-      <span class="kbd">⌘?</span>
-      <h3>Onboarding by way of a page</h3>
-      <p>First launch opens a single document that <em>is</em> the lesson. <code>⌘?</code> shows every shortcut on one screen. No wizard, no tour, no "skip". Editing or deleting is the natural exit.</p>
+      <span class="kbd">⌘F</span>
+      <h3>Find, themes, shortcuts</h3>
+      <p>Find in page, system-following light mode, syntax-colored fences, and a compact <code>⌘?</code> shortcut sheet all live inside the same quiet editor.</p>
     </div>
   </div>
 </section>
@@ -1078,9 +1078,9 @@ a { color: inherit; text-decoration: none; }
       <div class="desc">Keystroke to fully-rendered character. Below the threshold of perceived lag.</div>
     </div>
     <div class="stat reveal" style="--delay: 80ms">
-      <div class="num"><span data-counter="710">0</span><span class="unit">KB</span></div>
-      <div class="label">Binary size</div>
-      <div class="desc">Universal Mac binary. Browse, find, syntax highlighting — all baked in. Still smaller than most browser extensions.</div>
+      <div class="num"><span data-counter="2">0</span><span class="unit">MB</span></div>
+      <div class="label">Download size</div>
+      <div class="desc">Notarized DMG with Sparkle included. Still a small native Mac app, now with real updates.</div>
     </div>
     <div class="stat reveal" style="--delay: 160ms">
       <div class="num"><span data-counter="3">0</span><span class="unit">files</span></div>
@@ -1088,9 +1088,9 @@ a { color: inherit; text-decoration: none; }
       <div class="desc"><code>main.swift</code>, <code>sshio.swift</code>, <code>index.html</code>. Read every line in an afternoon.</div>
     </div>
     <div class="stat reveal" style="--delay: 240ms">
-      <div class="num"><span data-counter="0">0</span></div>
-      <div class="label">Dependencies</div>
-      <div class="desc">No Electron. No Node. No bundler. Just Apple frameworks.</div>
+      <div class="num"><span data-counter="1">0</span></div>
+      <div class="label">Updater framework</div>
+      <div class="desc">Sparkle handles signed app updates. No Electron. No Node. No bundler.</div>
     </div>
     <div class="stat reveal" style="--delay: 320ms">
       <div class="num"><span data-counter="1">0</span><span class="unit">protocol</span></div>
@@ -1109,7 +1109,7 @@ a { color: inherit; text-decoration: none; }
 <section class="download" id="download">
   <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">08 ·</span>&nbsp;take it home</div>
   <h2 class="reveal">It's yours.</h2>
-  <p class="lead reveal">A single drag into <span class="hl">/Applications</span>. That's the install.</p>
+  <p class="lead reveal">A single drag into <span class="hl">/Applications</span>. Future updates happen in Plume.</p>
   <div class="cta-row reveal">
     <a class="btn btn-primary" href="https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg">
       Download for macOS
@@ -1121,7 +1121,7 @@ a { color: inherit; text-decoration: none; }
     </a>
   </div>
   <div class="specs">
-    <span>macOS 12+</span><span>Universal Binary</span><span>Notarized</span><span>Free · MIT</span>
+    <span>macOS 12+</span><span>Universal Binary</span><span>Notarized</span><span>Sparkle Updates</span><span>Free · MIT</span>
   </div>
 </section>
 
