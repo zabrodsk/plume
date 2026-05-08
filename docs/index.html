@@ -218,12 +218,16 @@ a { color: inherit; text-decoration: none; }
   font-style: italic;
   font-weight: 400;
   font-size: clamp(96px, 22vw, 320px);
-  line-height: 1.1;
+  /* line-height 1.35 + padding-bottom 0.22em together contain the
+     italic Fraunces descender ("p", "l") at the 320px ceiling.
+     Anything tighter clips on Safari at large viewports. */
+  line-height: 1.35;
   letter-spacing: -0.04em;
   color: var(--ink);
   position: relative;
   display: inline-block;
-  padding-bottom: 0.08em;
+  padding-bottom: 0.22em;
+  overflow: visible;
 }
 .hero-mark .caret-bar {
   display: inline-block;
@@ -239,7 +243,13 @@ a { color: inherit; text-decoration: none; }
 .hero-mark .letter {
   display: inline-block;
   animation: dropIn 900ms var(--ease) both;
-  will-change: transform, opacity;
+  /* Each letter is its own compositor layer because of the transform in
+     dropIn keyframes. Layers clip painting at their own border-box, so
+     padding-bottom + overflow:visible here is what actually keeps
+     italic descenders visible — extending the parent's box isn't
+     enough. Don't remove without re-testing the "p" tail in Safari. */
+  padding-bottom: 0.25em;
+  overflow: visible;
 }
 @keyframes dropIn {
   from { opacity: 0; transform: translateY(0.4em); filter: blur(8px); }
