@@ -127,8 +127,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         window.titleVisibility = .visible
         window.center()
         window.delegate = self
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
+        let bgColor = NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
+            } else {
+                return NSColor(red: 0.992, green: 0.980, blue: 0.949, alpha: 1.0)
+            }
+        }
+        window.backgroundColor = bgColor
         window.minSize = NSSize(width: 480, height: 360)
         window.isReleasedWhenClosed = false
 
@@ -146,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.autoresizingMask = [.width, .height]
         webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 12.0, *) {
-            webView.underPageBackgroundColor = window.backgroundColor ?? .black
+            webView.underPageBackgroundColor = bgColor
         }
 
         if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
@@ -704,7 +710,6 @@ final class BrowseWindowController: NSWindowController, NSTableViewDataSource, N
         let frame = NSRect(x: 0, y: 0, width: 480, height: 400)
         let style: NSWindow.StyleMask = [.titled, .closable, .resizable]
         let win = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
-        win.appearance = NSAppearance(named: .darkAqua)
         win.minSize = NSSize(width: 320, height: 240)
         win.isReleasedWhenClosed = false
         super.init(window: win)

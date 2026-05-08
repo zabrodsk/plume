@@ -13,6 +13,25 @@
     --selection: rgba(121, 184, 255, 0.22);
   }
 
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fdfaf2;
+      --ink: #2a2620;
+      --ghost: #c4bdb0;
+      --caret: #1f6feb;
+      --selection: rgba(31, 111, 235, 0.18);
+    }
+    .hl { background: rgba(0, 0, 0, 0.035); }
+    .tok-keyword { color: #8a3fa0; }
+    .tok-string  { color: #4f7a3f; }
+    .tok-number  { color: #b95820; }
+    .tok-comment { color: #8a857a; font-style: italic; }
+    .tok-tag     { color: #1f6feb; }
+    .tok-attr    { color: #b8810f; }
+    .tok-prop    { color: #b8810f; }
+    .tok-punct   { color: var(--ghost); }
+  }
+
   * { box-sizing: border-box; }
 
   html, body {
