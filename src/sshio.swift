@@ -1,5 +1,17 @@
 import Foundation
 
+// MARK: - Browse entry
+
+struct BrowseEntry: Equatable {
+    let name: String        // e.g. "notes" or "post.md"
+    let isDirectory: Bool
+    var isOpenable: Bool {  // .md / .markdown / .txt only
+        guard !isDirectory else { return false }
+        let lower = name.lowercased()
+        return lower.hasSuffix(".md") || lower.hasSuffix(".markdown") || lower.hasSuffix(".txt")
+    }
+}
+
 // MARK: - File source
 
 enum FileSource {
@@ -141,6 +153,137 @@ enum SSHIO {
                 completion(.failure(error))
             }
         }
+    }
+
+    /// List a remote directory, returning sorted BrowseEntry values.
+    /// Tries GNU ls flags first; falls back to BSD-compatible ls -1ap if the remote rejects them.
+    static func list(host: String, path: String, completion: @escaping (Result<[BrowseEntry], Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let quotedPath = shellQuote(path)
+            // First attempt: GNU ls with long format for reliable type detection.
+            let gnuArgs = sshArgs(for: host) + ["ls -lap --time-style=long-iso -- \(quotedPath)"]
+            if let entries = runLS(host: host, args: gnuArgs, longFormat: true) {
+                completion(.success(sortEntries(entries, path: path)))
+                return
+            }
+            // Fallback: BSD ls (macOS remotes, older Linux) which rejects --time-style.
+            let bsdArgs = sshArgs(for: host) + ["ls -1ap -- \(quotedPath)"]
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            proc.arguments = bsdArgs
+            let outPipe = Pipe(); let errPipe = Pipe()
+            proc.standardOutput = outPipe
+            proc.standardError = errPipe
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                if proc.terminationStatus != 0 {
+                    let err = String(data: errData, encoding: .utf8) ?? ""
+                    completion(.failure(SSHError.nonZeroExit(code: proc.terminationStatus, stderr: err)))
+                    return
+                }
+                let stdout = String(data: data, encoding: .utf8) ?? ""
+                let entries = parseShortFormat(stdout)
+                completion(.success(sortEntries(entries, path: path)))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    /// Join a path component onto a base path. Handles ".." (go to parent) and trailing-slash normalisation.
+    static func joinPath(_ base: String, _ component: String) -> String {
+        if component == ".." {
+            let parent = (base as NSString).deletingLastPathComponent
+            return parent.isEmpty ? "/" : parent
+        }
+        let sep = base.hasSuffix("/") ? "" : "/"
+        return base + sep + component
+    }
+
+    // Run ls with the given pre-built argument list; returns nil if ssh exits non-zero.
+    private static func runLS(host: String, args: [String], longFormat: Bool) -> [BrowseEntry]? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        proc.arguments = args
+        let outPipe = Pipe(); let errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+        guard (try? proc.run()) != nil else { return nil }
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: data, encoding: .utf8) ?? ""
+        return longFormat ? parseLongFormat(stdout) : parseShortFormat(stdout)
+    }
+
+    // Parse `ls -lap` long format. Each non-header line: permissions, links, user, group, size, date, time, name.
+    private static func parseLongFormat(_ output: String) -> [BrowseEntry] {
+        var entries: [BrowseEntry] = []
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            // Skip the "total NNN" header line.
+            if trimmed.hasPrefix("total ") { continue }
+            let firstChar = trimmed.first ?? " "
+            // We care about regular files (-), directories (d), and symlinks (l).
+            guard firstChar == "-" || firstChar == "d" || firstChar == "l" else { continue }
+            // Name is the last whitespace-separated field (after the time field).
+            guard let name = extractName(from: trimmed, isLong: true) else { continue }
+            if name == "." || name == ".." { continue }
+            if name.hasPrefix(".") { continue }  // hide dotfiles for v2.5
+            let isDir = name.hasSuffix("/") || firstChar == "d"
+            let cleanName = name.hasSuffix("/") ? String(name.dropLast()) : name
+            entries.append(BrowseEntry(name: cleanName, isDirectory: isDir))
+        }
+        return entries
+    }
+
+    // Parse `ls -1ap` short format. Each line is just the name with optional trailing "/".
+    private static func parseShortFormat(_ output: String) -> [BrowseEntry] {
+        var entries: [BrowseEntry] = []
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            if trimmed == "." || trimmed == ".." || trimmed == "./" || trimmed == "../" { continue }
+            if trimmed.hasPrefix(".") { continue }  // hide dotfiles
+            let isDir = trimmed.hasSuffix("/")
+            let cleanName = isDir ? String(trimmed.dropLast()) : trimmed
+            entries.append(BrowseEntry(name: cleanName, isDirectory: isDir))
+        }
+        return entries
+    }
+
+    // Extract the file name from a long-format ls line.
+    // Name is the last token after the date+time fields (index 7+). Handle "name -> target" symlinks.
+    private static func extractName(from line: String, isLong: Bool) -> String? {
+        guard isLong else { return line.trimmingCharacters(in: .whitespaces) }
+        let tokens = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        // Long format has at least 8 tokens: perms links user group size date time name...
+        guard tokens.count >= 8 else { return nil }
+        // Rejoin everything from index 7 onward (name may contain spaces).
+        let namePart = tokens[7...].joined(separator: " ")
+        // Strip symlink target: "name -> /target" → "name"
+        if let arrowRange = namePart.range(of: " -> ") {
+            return String(namePart[..<arrowRange.lowerBound])
+        }
+        return namePart
+    }
+
+    // Sort: ".." synthetic first, then real directories (alpha), then files (alpha).
+    private static func sortEntries(_ raw: [BrowseEntry], path: String) -> [BrowseEntry] {
+        var result: [BrowseEntry] = []
+        // Add synthetic ".." unless we're at root.
+        let normalised = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+        if normalised != "/" {
+            result.append(BrowseEntry(name: "..", isDirectory: true))
+        }
+        let dirs  = raw.filter { $0.isDirectory  }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        let files = raw.filter { !$0.isDirectory }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        result += dirs + files
+        return result
     }
 
     /// Common ssh flags. BatchMode prevents interactive password prompts (we want to fail
