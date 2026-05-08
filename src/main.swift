@@ -2,180 +2,248 @@ import Cocoa
 import WebKit
 import UniformTypeIdentifiers
 
-// MARK: - File source
+// FileSource, SSHPath, SSHIO live in sshio.swift.
 
-enum FileSource {
-    case local(URL)
-    case remote(SSHPath)
+// MARK: - Progress overlay
 
-    var displayName: String {
-        switch self {
-        case .local(let url):  return url.lastPathComponent
-        case .remote(let p):   return "ssh: \(p.display)"
-        }
+/// Small non-modal overlay anchored to the bottom-right of a parent view.
+/// Shows a loading message and a Cancel button. Fades in after being added.
+final class ProgressOverlay {
+    private let view: NSView
+    private weak var parent: NSView?
+
+    init(parent: NSView, message: String, onCancel: @escaping () -> Void) {
+        self.parent = parent
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 0.90).cgColor
+        container.layer?.cornerRadius = 8
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField(labelWithString: message)
+        label.textColor = NSColor(red: 0.910, green: 0.894, blue: 0.847, alpha: 1.0)
+        label.font = NSFont.systemFont(ofSize: 12)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let cancelBtn = NSButton(title: "Cancel", target: nil, action: nil)
+        cancelBtn.bezelStyle = .recessed
+        cancelBtn.isBordered = false
+        cancelBtn.contentTintColor = NSColor(red: 0.910, green: 0.894, blue: 0.847, alpha: 0.75)
+        cancelBtn.font = NSFont.systemFont(ofSize: 12)
+        cancelBtn.translatesAutoresizingMaskIntoConstraints = false
+        cancelBtn.onAction { onCancel() }
+
+        container.addSubview(label)
+        container.addSubview(cancelBtn)
+
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(equalToConstant: 44),
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
+
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: cancelBtn.leadingAnchor, constant: -8),
+
+            cancelBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            cancelBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+
+        self.view = container
+        parent.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16),
+            container.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -16),
+        ])
+
+        // Fade in
+        container.layer?.opacity = 0
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.15
+        fade.fillMode = .forwards
+        fade.isRemovedOnCompletion = false
+        container.layer?.add(fade, forKey: "fadeIn")
+        container.layer?.opacity = 1
+    }
+
+    func dismiss() {
+        view.removeFromSuperview()
     }
 }
 
-// MARK: - SSH path
-
-struct SSHPath: Equatable {
-    let user: String?
-    let host: String
-    let path: String
-
-    var display: String {
-        let u = user.map { "\($0)@" } ?? ""
-        return "\(u)\(host):\(path)"
+// Helper to attach an action closure to NSButton without a target/selector dance.
+private enum AssociatedKeys {
+    static var action: UInt8 = 0
+}
+private extension NSButton {
+    func onAction(_ block: @escaping () -> Void) {
+        objc_setAssociatedObject(self, &AssociatedKeys.action, block as AnyObject, .OBJC_ASSOCIATION_RETAIN)
+        target = self
+        action = #selector(runAction)
     }
-
-    var sshTarget: String {
-        let u = user.map { "\($0)@" } ?? ""
-        return "\(u)\(host)"
-    }
-
-    /// Parse `[user@]host:path`. The first colon separates host from path.
-    /// IPv6 in brackets and Windows-style colons are out of scope for v2.
-    static func parse(_ raw: String) -> SSHPath? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let colon = trimmed.firstIndex(of: ":") else { return nil }
-        let hostPart = String(trimmed[..<colon])
-        let pathPart = String(trimmed[trimmed.index(after: colon)...])
-        guard !hostPart.isEmpty, !pathPart.isEmpty else { return nil }
-
-        if let at = hostPart.firstIndex(of: "@") {
-            let user = String(hostPart[..<at])
-            let host = String(hostPart[hostPart.index(after: at)...])
-            guard !user.isEmpty, !host.isEmpty else { return nil }
-            return SSHPath(user: user, host: host, path: pathPart)
-        }
-        return SSHPath(user: nil, host: hostPart, path: pathPart)
+    @objc private func runAction() {
+        (objc_getAssociatedObject(self, &AssociatedKeys.action) as? () -> Void)?()
     }
 }
 
-// MARK: - SSH I/O
+// MARK: - Update check
 
-/// Shells out to /usr/bin/ssh. Zero bundled dependencies.
-enum SSHIO {
-    enum SSHError: LocalizedError {
-        case nonZeroExit(code: Int32, stderr: String)
-        case decodeFailed
+enum UpdateCheck {
+    private static let endpoint = URL(string: "https://api.github.com/repos/zabrodsk/plume/releases/latest")!
+    private static let releasesPage = URL(string: "https://github.com/zabrodsk/plume/releases/latest")!
 
-        var errorDescription: String? {
-            switch self {
-            case .nonZeroExit(let c, let s):
-                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty { return "ssh exited with code \(c)." }
-                return "ssh exited with code \(c): \(trimmed)"
-            case .decodeFailed:
-                return "Remote file is not valid UTF-8."
-            }
+    struct AvailableUpdate {
+        let latestTag: String
+        let url: URL
+    }
+
+    static var releasesURL: URL { releasesPage }
+
+    /// Run a check if all opt-out gates allow it.
+    /// - argvDisabled: pass true if the launch had --no-update-check.
+    /// - completion: invoked on the main queue; nil if no update or any gate failed.
+    static func runIfNeeded(argvDisabled: Bool, completion: @escaping (AvailableUpdate?) -> Void) {
+        // Gate 1: argv flag
+        if argvDisabled { completion(nil); return }
+
+        // Gate 2: explicit user pref. Default true.
+        let prefKey = "plume.updateCheckEnabled"
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: prefKey) != nil && defaults.bool(forKey: prefKey) == false {
+            completion(nil); return
         }
-    }
 
-    /// Read remote text file via `ssh host cat`.
-    static func read(_ remote: SSHPath, completion: @escaping (Result<String, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            proc.arguments = sshArgs(for: remote.sshTarget) + [
-                "cat", "--", shellQuote(remote.path)
-            ]
-
-            let outPipe = Pipe(); let errPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = errPipe
-
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-
-                if proc.terminationStatus != 0 {
-                    let err = String(data: errData, encoding: .utf8) ?? ""
-                    completion(.failure(SSHError.nonZeroExit(code: proc.terminationStatus, stderr: err)))
-                    return
-                }
-                guard let text = String(data: data, encoding: .utf8) else {
-                    completion(.failure(SSHError.decodeFailed))
-                    return
-                }
-                completion(.success(text))
-            } catch {
-                completion(.failure(error))
-            }
+        // Gate 3: once per day debounce
+        let lastKey = "plume.lastUpdateCheckDate"
+        if let last = defaults.object(forKey: lastKey) as? Date,
+           Date().timeIntervalSince(last) < 24 * 3600 {
+            completion(nil); return
         }
-    }
 
-    /// Write remote text file atomically (write to .tmp, then mv).
-    static func write(_ text: String, to remote: SSHPath, completion: @escaping (Result<Void, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        var req = URLRequest(url: endpoint)
+        req.timeoutInterval = 10
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("plume/\(currentVersion()) (macOS)", forHTTPHeaderField: "User-Agent")
 
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let pathQ = shellQuote(remote.path)
-            let tmpQ  = shellQuote("\(remote.path).plume-tmp.\(pid)")
-            let remoteCmd = "cat > \(tmpQ) && mv \(tmpQ) \(pathQ)"
-
-            proc.arguments = sshArgs(for: remote.sshTarget) + [remoteCmd]
-
-            let inPipe = Pipe(); let errPipe = Pipe()
-            proc.standardInput = inPipe
-            proc.standardError = errPipe
-
-            do {
-                try proc.run()
-                if let data = text.data(using: .utf8) {
-                    try inPipe.fileHandleForWriting.write(contentsOf: data)
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            DispatchQueue.main.async {
+                guard error == nil,
+                      let http = response as? HTTPURLResponse, http.statusCode == 200,
+                      let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = obj["tag_name"] as? String else {
+                    completion(nil); return
                 }
-                try inPipe.fileHandleForWriting.close()
-                proc.waitUntilExit()
+                defaults.set(Date(), forKey: lastKey)
 
-                if proc.terminationStatus != 0 {
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    let err = String(data: errData, encoding: .utf8) ?? ""
-                    completion(.failure(SSHError.nonZeroExit(code: proc.terminationStatus, stderr: err)))
-                    return
+                if isNewer(remote: tag, local: currentVersion()) {
+                    completion(AvailableUpdate(latestTag: tag, url: releasesPage))
+                } else {
+                    completion(nil)
                 }
-                completion(.success(()))
-            } catch {
-                completion(.failure(error))
             }
+        }.resume()
+    }
+
+    private static func currentVersion() -> String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
+    }
+
+    /// Compare versions like "v2.6" vs "2.5.0". Strips an optional leading 'v'.
+    /// Pads shorter component lists with zeros so "2.5" == "2.5.0".
+    static func isNewer(remote: String, local: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            var stripped = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if stripped.first == "v" || stripped.first == "V" { stripped.removeFirst() }
+            // Stop at the first non-version-like character (e.g. "-beta")
+            let cut = stripped.firstIndex(where: { !($0.isNumber || $0 == ".") }) ?? stripped.endIndex
+            return String(stripped[..<cut]).split(separator: ".").compactMap { Int($0) }
         }
-    }
-
-    /// Common ssh flags. BatchMode prevents interactive password prompts (we want to fail
-    /// fast rather than block the UI on a hidden tty); ConnectTimeout caps the wait.
-    private static func sshArgs(for target: String) -> [String] {
-        return [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-            "-o", "ServerAliveInterval=15",
-            target
-        ]
-    }
-
-    /// POSIX shell single-quote escape: wrap in '…', and escape embedded ' as '\''.
-    private static func shellQuote(_ s: String) -> String {
-        return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let r = parts(remote); let l = parts(local)
+        let n = max(r.count, l.count)
+        for i in 0..<n {
+            let ri = i < r.count ? r[i] : 0
+            let li = i < l.count ? l[i] : 0
+            if ri > li { return true }
+            if ri < li { return false }
+        }
+        return false
     }
 }
 
 // MARK: - App delegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, NSWindowDelegate, NSMenuDelegate {
 
     var window: NSWindow!
     var webView: WKWebView!
     var currentFile: FileSource?
     var isDirty: Bool = false
     var pendingFileToOpen: URL?
+    var pendingRemoteToOpen: SSHPath?
     var jsReady: Bool = false
+    var browseController: BrowseWindowController?
+
+    private var currentReadTask: SSHTask?
+    private var progressOverlay: ProgressOverlay?
+    private var escMonitor: Any?
+
+    // Version-keyed so future releases can independently decide whether to show a new welcome.
+    private static let firstLaunchKey = "plume.firstLaunchSeen.2.5.0"
+
+    private static let welcomeDocument = """
+# Welcome to Plume.
+
+Plume is a markdown editor for the satisfaction of typing. Every
+letter *blooms*. **Nothing else does.**
+
+## Four keys that matter
+
+- **⌘O** — open a local file
+- **⌥⌘O** — open a file on a remote server via SSH
+- **⌘F** — find in this page
+- **⌘?** — every other shortcut
+
+## A taste of what renders
+
+Inline code looks like `let x = 42`. Fenced code with a language
+tag gets colored:
+
+```swift
+func bloom(_ letter: Character) -> Animation {
+    .opacity(from: 0.4, to: 1.0, duration: .ms(90))
+}
+```
+
+A link points [home](https://github.com/zabrodsk/plume).
+
+## The page is yours.
+
+Delete this. Type something. Save with `⌘S`. That's all there is.
+
+> *Less app. More page.*
+
+"""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
         setupWindow()
+        let argvDisabled = CommandLine.arguments.contains("--no-update-check")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            UpdateCheck.runIfNeeded(argvDisabled: argvDisabled) { available in
+                guard let self = self, let u = available else { return }
+                self.notifyJSAboutUpdate(tag: u.latestTag, url: u.url.absoluteString)
+            }
+        }
+    }
+
+    private func notifyJSAboutUpdate(tag: String, url: String) {
+        let escTag = encodeForJS(tag)
+        let escURL = encodeForJS(url)
+        webView.evaluateJavaScript("window.update_show && window.update_show(\(escTag), \(escURL))")
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
@@ -194,8 +262,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         window.titleVisibility = .visible
         window.center()
         window.delegate = self
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
+        let bgColor = NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
+            } else {
+                return NSColor(red: 0.992, green: 0.980, blue: 0.949, alpha: 1.0)
+            }
+        }
+        window.backgroundColor = bgColor
         window.minSize = NSSize(width: 480, height: 360)
         window.isReleasedWhenClosed = false
 
@@ -203,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let ucc = WKUserContentController()
         ucc.add(self, name: "dirty")
         ucc.add(self, name: "ready")
+        ucc.add(self, name: "openURL")
         config.userContentController = ucc
 
         let prefs = WKPreferences()
@@ -213,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.autoresizingMask = [.width, .height]
         webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 12.0, *) {
-            webView.underPageBackgroundColor = window.backgroundColor ?? .black
+            webView.underPageBackgroundColor = bgColor
         }
 
         if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
@@ -262,6 +337,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         openSSH.keyEquivalentModifierMask = [.command, .option]
         fileMenu.addItem(openSSH)
 
+        let openRecent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let openRecentMenu = NSMenu(title: "Open Recent")
+        openRecentMenu.delegate = self
+        openRecent.submenu = openRecentMenu
+        fileMenu.addItem(openRecent)
+
         fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(title: "Save", action: #selector(saveFile), keyEquivalent: "s"))
         let saveAs = NSMenuItem(title: "Save As\u{2026}", action: #selector(saveFileAs), keyEquivalent: "S")
@@ -287,6 +368,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         editMenu.addItem(NSMenuItem(title: "Select All",
                                     action: #selector(NSText.selectAll(_:)),
                                     keyEquivalent: "a"))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Find\u{2026}", action: #selector(performFind), keyEquivalent: "f"))
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -312,11 +395,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         mainMenu.addItem(windowMenuItem)
         NSApp.windowsMenu = windowMenu
 
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let cheatsheetItem = NSMenuItem(title: "Plume Cheatsheet",
+                                        action: #selector(showCheatsheet),
+                                        keyEquivalent: "?")
+        cheatsheetItem.keyEquivalentModifierMask = [.command, .shift]
+        helpMenu.addItem(cheatsheetItem)
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+        NSApp.helpMenu = helpMenu
+
         NSApp.mainMenu = mainMenu
     }
 
     var appName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Plume"
+    }
+
+    @objc func performFind() {
+        webView.evaluateJavaScript("window.find_open && window.find_open()")
+    }
+
+    @objc func showCheatsheet() {
+        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
     }
 
     @objc func newFile() {
@@ -348,23 +450,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             guard let self = self else { return }
             let alert = NSAlert()
             alert.messageText = "Open via SSH"
-            alert.informativeText = "Enter [user@]host:path. Uses your existing SSH keys and ~/.ssh/config."
+            alert.informativeText = "Pick a host to browse, or type a full [user@]host:path to open directly."
             alert.addButton(withTitle: "Open")
             alert.addButton(withTitle: "Cancel")
 
-            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-            field.placeholderString = "user@host:/path/to/file.md"
-            alert.accessoryView = field
-            alert.window.initialFirstResponder = field
+            let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            combo.placeholderString = "user@host  or  user@host:/path/to/file.md"
+            combo.completes = true
+            combo.usesDataSource = false
+            combo.addItems(withObjectValues: SSHConfig.hostAliases())
+
+            let key = "plume.sshDialogSeen"
+            let firstTime = !UserDefaults.standard.bool(forKey: key)
+
+            let hint: NSTextField? = firstTime ? {
+                let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
+                label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
+                label.textColor = NSColor.secondaryLabelColor
+                label.maximumNumberOfLines = 2
+                label.lineBreakMode = .byWordWrapping
+                return label
+            }() : nil
+
+            let accessoryView: NSView
+            if let hint = hint {
+                let stack = NSStackView(views: [combo, hint])
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 6
+                stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
+                accessoryView = stack
+            } else {
+                accessoryView = combo
+            }
+            alert.accessoryView = accessoryView
+            alert.window.initialFirstResponder = combo
+
+            if firstTime {
+                UserDefaults.standard.set(true, forKey: key)
+            }
 
             alert.beginSheetModal(for: self.window) { response in
                 guard response == .alertFirstButtonReturn else { return }
-                let raw = field.stringValue
-                guard let remote = SSHPath.parse(raw) else {
-                    self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
-                    return
+                let raw = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !raw.isEmpty else { return }
+
+                if raw.contains(":") {
+                    // Full [user@]host:path — existing fast-path.
+                    guard let remote = SSHPath.parse(raw) else {
+                        self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
+                        return
+                    }
+                    self.loadRemote(remote)
+                } else {
+                    // Host alias — open browse window.
+                    let host = raw
+                    let lastPath = UserDefaults.standard.string(forKey: "plume.lastDir.\(host)") ?? "."
+                    self.browseController = BrowseWindowController(host: host, initialPath: lastPath) { [weak self] picked in
+                        self?.loadRemote(picked)
+                        self?.browseController = nil
+                    }
+                    self.browseController?.showWindow(nil)
                 }
-                self.loadRemote(remote)
             }
         }
     }
@@ -376,29 +523,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             isDirty = false
             sendContentToEditor(content, displayPath: url.path)
             updateTitle()
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
         } catch {
             showError("Could not read file: \(error.localizedDescription)")
         }
     }
 
     func loadRemote(_ remote: SSHPath) {
-        // Optimistically show progress in title; actual content fills in async.
         window.title = "Loading \(remote.display)…"
-        SSHIO.read(remote) { [weak self] result in
+
+        // Install an Esc key monitor while the read is in flight.
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.currentReadTask != nil else { return event }
+            if event.keyCode == 53 {  // Esc
+                self.currentReadTask?.cancel()
+                return nil
+            }
+            return event
+        }
+
+        let task = SSHIO.read(remote) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.dismissReadProgress()
                 switch result {
                 case .success(let content):
                     self.currentFile = .remote(remote)
                     self.isDirty = false
                     self.sendContentToEditor(content, displayPath: remote.display)
                     self.updateTitle()
+                    if let url = self.recentURL(for: remote) {
+                        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                    }
                 case .failure(let err):
                     self.updateTitle()
-                    self.showError("SSH read failed: \(err.localizedDescription)")
+                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError { return }
+                    self.showSSHError(err, host: remote.host, path: remote.path)
                 }
             }
         }
+        currentReadTask = task
+
+        // Show the overlay after 250 ms — skip it entirely if the read is already done.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self, self.currentReadTask != nil,
+                  let contentView = self.window.contentView else { return }
+            let pathDisplay = (remote.path as NSString).lastPathComponent.isEmpty
+                ? remote.path
+                : (remote.path as NSString).lastPathComponent
+            let msg = "Loading \(remote.host):\(pathDisplay)…"
+            self.progressOverlay = ProgressOverlay(
+                parent: contentView,
+                message: msg,
+                onCancel: { [weak self] in self?.currentReadTask?.cancel() }
+            )
+        }
+    }
+
+    private func dismissReadProgress() {
+        progressOverlay?.dismiss()
+        progressOverlay = nil
+        currentReadTask = nil
+        if let monitor = escMonitor {
+            NSEvent.removeMonitor(monitor)
+            escMonitor = nil
+        }
+    }
+
+    /// Synthesise a plume-ssh:// URL for Open Recent. We use a custom scheme so
+    /// NSDocumentController can track remote files the same way it tracks local ones.
+    private func recentURL(for remote: SSHPath) -> URL? {
+        var components = URLComponents()
+        components.scheme = "plume-ssh"
+        // remote.host may be "user@server" (browse flow) or bare "server" (direct path flow).
+        // URLComponents.host rejects embedded "@", so split user out explicitly.
+        if let user = remote.user {
+            components.user = user
+            components.host = remote.host
+        } else if let at = remote.host.firstIndex(of: "@") {
+            components.user = String(remote.host[..<at])
+            components.host = String(remote.host[remote.host.index(after: at)...])
+        } else {
+            components.host = remote.host
+        }
+        components.path = remote.path.hasPrefix("/") ? remote.path : "/" + remote.path
+        return components.url
     }
 
     @objc func saveFile() {
@@ -447,7 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                             self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
                             self.updateTitle()
                         case .failure(let err):
-                            self.showError("SSH save failed: \(err.localizedDescription)")
+                            self.showSSHError(err, host: remote.host, path: remote.path)
                         }
                     }
                 }
@@ -502,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                                 self.updateTitle()
                                 proceed()
                             case .failure(let err):
-                                self.showError("SSH save failed: \(err.localizedDescription)")
+                                self.showSSHError(err, host: remote.host, path: remote.path)
                             }
                         }
                     }
@@ -561,6 +770,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         alert.beginSheetModal(for: window, completionHandler: nil)
     }
 
+    private func showSSHError(_ error: Error, host: String, path: String?) {
+        let info = SSHIO.describe(error: error, host: host, path: path)
+        let alert = NSAlert()
+        alert.messageText = info.title
+        alert.informativeText = info.body
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if url.scheme == "plume-ssh" {
+                let path = url.path
+                let host: String = {
+                    if let user = url.user, let h = url.host { return "\(user)@\(h)" }
+                    return url.host ?? ""
+                }()
+                guard !host.isEmpty else { continue }
+                let remote = SSHPath(user: nil, host: host, path: path)
+                if jsReady { loadRemote(remote) } else { pendingRemoteToOpen = remote }
+            } else if url.isFileURL {
+                if jsReady { loadLocal(url) } else { pendingFileToOpen = url }
+            }
+        }
+    }
+
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "dirty":
@@ -571,10 +806,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             if let url = pendingFileToOpen {
                 pendingFileToOpen = nil
                 loadLocal(url)
+            } else if let remote = pendingRemoteToOpen {
+                pendingRemoteToOpen = nil
+                loadRemote(remote)
+            } else {
+                showWelcomeIfFirstLaunch()
+            }
+        case "openURL":
+            if let s = message.body as? String, let url = URL(string: s) {
+                NSWorkspace.shared.open(url)
             }
         default:
             break
         }
+    }
+
+    private func showWelcomeIfFirstLaunch() {
+        if UserDefaults.standard.bool(forKey: AppDelegate.firstLaunchKey) { return }
+        UserDefaults.standard.set(true, forKey: AppDelegate.firstLaunchKey)
+        // currentFile stays nil — saving will prompt via Save As.
+        // isDirty = true so ⌘W triggers the unsaved-changes prompt.
+        sendContentToEditor(AppDelegate.welcomeDocument, displayPath: nil)
+        isDirty = true
+        updateTitle()
     }
 
     private func sendContentToEditor(_ content: String, displayPath: String?) {
@@ -588,6 +842,251 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         var json = String(data: data, encoding: .utf8) ?? "[\"\"]"
         json.removeFirst(); json.removeLast()
         return json
+    }
+
+    // MARK: - NSMenuDelegate (Open Recent)
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.title == "Open Recent" else { return }
+        menu.removeAllItems()
+        let urls = NSDocumentController.shared.recentDocumentURLs
+        if urls.isEmpty {
+            let italic = NSFontManager.shared.convert(NSFont.menuFont(ofSize: 0), toHaveTrait: .italicFontMask)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: italic,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+            let row1 = NSMenuItem()
+            row1.attributedTitle = NSAttributedString(string: "no files yet", attributes: attrs)
+            row1.isEnabled = false
+            let row2 = NSMenuItem()
+            row2.attributedTitle = NSAttributedString(string: "⌘O local · ⌥⌘O remote", attributes: attrs)
+            row2.isEnabled = false
+            menu.addItem(row1)
+            menu.addItem(row2)
+            return
+        }
+        for url in urls {
+            let title: String
+            if url.scheme == "plume-ssh" {
+                let userPart = url.user.map { "\($0)@" } ?? ""
+                title = "ssh: \(userPart)\(url.host ?? "?")\(url.path)"
+            } else {
+                title = url.lastPathComponent
+            }
+            let item = NSMenuItem(title: title, action: #selector(openRecentItem(_:)), keyEquivalent: "")
+            item.representedObject = url
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let clear = NSMenuItem(title: "Clear Menu", action: #selector(clearRecents), keyEquivalent: "")
+        clear.target = self
+        menu.addItem(clear)
+    }
+
+    @objc func openRecentItem(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSApp.delegate?.application?(NSApp, open: [url])
+    }
+
+    @objc func clearRecents() {
+        NSDocumentController.shared.clearRecentDocuments(nil)
+    }
+}
+
+// MARK: - Browse window controller
+
+final class BrowseWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+
+    private let host: String
+    private var currentPath: String
+    private let onOpen: (SSHPath) -> Void
+
+    private var entries: [BrowseEntry] = []
+    private let tableView = NSTableView()
+    private let statusLabel = NSTextField(labelWithString: "")
+
+    init(host: String, initialPath: String, onOpen: @escaping (SSHPath) -> Void) {
+        self.host = host
+        self.currentPath = initialPath
+        self.onOpen = onOpen
+
+        let frame = NSRect(x: 0, y: 0, width: 480, height: 400)
+        let style: NSWindow.StyleMask = [.titled, .closable, .resizable]
+        let win = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
+        win.minSize = NSSize(width: 320, height: 240)
+        win.isReleasedWhenClosed = false
+        super.init(window: win)
+
+        buildUI()
+        loadDirectory()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    private func buildUI() {
+        guard let win = window else { return }
+        win.title = "Browse — \(host):\(currentPath)"
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        column.title = "Name"
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.allowsMultipleSelection = false
+        tableView.rowHeight = 22
+        tableView.action = #selector(handleClick)
+        tableView.doubleAction = #selector(handleDoubleClick)
+        tableView.target = self
+
+        let scroll = NSScrollView()
+        scroll.documentView = tableView
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.alignment = .left
+        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        statusLabel.textColor = NSColor.secondaryLabelColor
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(scroll)
+        container.addSubview(statusLabel)
+
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            scroll.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -4),
+
+            statusLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            statusLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            statusLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            statusLabel.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
+        win.contentView = container
+        win.center()
+    }
+
+    private func loadDirectory() {
+        statusLabel.stringValue = "Loading\u{2026}"
+        entries = []
+        tableView.reloadData()
+        window?.title = "Browse — \(host):\(currentPath)"
+
+        SSHIO.list(host: host, path: currentPath) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                case .success(let list):
+                    self.entries = list
+                    self.tableView.reloadData()
+                    let count = list.filter { $0.name != ".." }.count
+                    self.statusLabel.stringValue = "\(count) item\(count == 1 ? "" : "s")"
+                case .failure(let err):
+                    self.entries = []
+                    self.tableView.reloadData()
+                    self.statusLabel.stringValue = err.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func navigate(to entry: BrowseEntry) {
+        guard entry.isDirectory else { return }
+        let newPath = SSHIO.joinPath(currentPath, entry.name)
+        currentPath = newPath
+        UserDefaults.standard.set(currentPath, forKey: "plume.lastDir.\(host)")
+        loadDirectory()
+    }
+
+    private func pick(entry: BrowseEntry) {
+        guard entry.isOpenable else { return }
+        let filePath = SSHIO.joinPath(currentPath, entry.name)
+        let remote = SSHPath(user: nil, host: host, path: filePath)
+        onOpen(remote)
+        window?.close()
+    }
+
+    // MARK: Click handling
+
+    @objc private func handleClick() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < entries.count else { return }
+        let entry = entries[row]
+        if entry.isOpenable {
+            pick(entry: entry)
+        }
+    }
+
+    @objc private func handleDoubleClick() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < entries.count else { return }
+        let entry = entries[row]
+        if entry.isDirectory {
+            navigate(to: entry)
+        } else if entry.isOpenable {
+            pick(entry: entry)
+        }
+    }
+
+    // MARK: Keyboard
+
+    override func keyDown(with event: NSEvent) {
+        let chars = event.charactersIgnoringModifiers ?? ""
+        if chars == "\r" || chars == "\n" {
+            let row = tableView.selectedRow
+            guard row >= 0, row < entries.count else { return }
+            let entry = entries[row]
+            if entry.isDirectory {
+                navigate(to: entry)
+            } else if entry.isOpenable {
+                pick(entry: entry)
+            }
+        } else if chars == "\u{1B}" {  // Esc
+            window?.close()
+        } else if chars == "\u{7F}" || (event.modifierFlags.contains(.command) && chars == "\u{F700}") {
+            // Backspace or Cmd-Up: go to parent
+            navigate(to: BrowseEntry(name: "..", isDirectory: true))
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    // MARK: NSTableViewDataSource
+
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+
+    // MARK: NSTableViewDelegate
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let entry = entries[row]
+        let id = NSUserInterfaceItemIdentifier("cell")
+        let cell: NSTableCellView
+        if let reuse = tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
+            cell = reuse
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = id
+            let tf = NSTextField(labelWithString: "")
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(tf)
+            cell.textField = tf
+            NSLayoutConstraint.activate([
+                tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            ])
+        }
+        let prefix = entry.isDirectory ? "\u{1F4C1} " : ""
+        cell.textField?.stringValue = prefix + entry.name
+        return cell
     }
 }
 

@@ -59,6 +59,8 @@ open Plume.app
 
 Requires macOS 12+ and the Swift toolchain (`xcode-select --install`).
 
+**Homebrew** &nbsp;→&nbsp; we don't host a tap. A sample cask lives at [`dist/plume.rb`](dist/plume.rb) — copy it into [homebrew-cask](https://github.com/Homebrew/homebrew-cask) as a community PR if you'd like to maintain one.
+
 <br>
 
 ## What's inside

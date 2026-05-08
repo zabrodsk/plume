@@ -13,6 +13,25 @@
     --selection: rgba(121, 184, 255, 0.22);
   }
 
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fdfaf2;
+      --ink: #2a2620;
+      --ghost: #c4bdb0;
+      --caret: #1f6feb;
+      --selection: rgba(31, 111, 235, 0.18);
+    }
+    .hl { background: rgba(0, 0, 0, 0.035); }
+    .tok-keyword { color: #8a3fa0; }
+    .tok-string  { color: #4f7a3f; }
+    .tok-number  { color: #b95820; }
+    .tok-comment { color: #8a857a; font-style: italic; }
+    .tok-tag     { color: #1f6feb; }
+    .tok-attr    { color: #b8810f; }
+    .tok-prop    { color: #b8810f; }
+    .tok-punct   { color: var(--ghost); }
+  }
+
   * { box-sizing: border-box; }
 
   html, body {
@@ -100,9 +119,177 @@
     z-index: 0;
   }
   .hint.gone { opacity: 0; }
+
+  /* Find bar */
+  #findbar {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 40px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--ghost);
+    z-index: 10;
+    align-items: center;
+    padding: 0 max(96px, 12vw);
+    gap: 8px;
+  }
+  #findbar.visible { display: flex; }
+
+  body.has-find .editor { padding-top: 104px; }
+  body.has-find .input-layer { top: 104px; }
+  body.has-find .hint { top: 104px; }
+
+  #findinput {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1;
+    caret-color: var(--caret);
+  }
+  #findstatus {
+    font-size: 12px;
+    color: var(--ghost);
+    white-space: nowrap;
+  }
+  #findclose {
+    background: none;
+    border: none;
+    color: var(--ghost);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  #findclose:hover { color: var(--ink); }
+
+  mark { background: rgba(255, 235, 99, 0.30); color: var(--ink); padding: 0; }
+  mark.mark-current { background: rgba(255, 235, 99, 0.55); }
+
+  /* Syntax highlighting */
+  .hl { background: rgba(255,255,255,0.025); padding: 8px 12px; border-radius: 4px; margin: 8px 0; display: block; white-space: pre-wrap; }
+  .tok-keyword { color: #c594c5; }
+  .tok-string  { color: #a3be8c; }
+  .tok-number  { color: #d08770; }
+  .tok-comment { color: #6a6660; font-style: italic; }
+  .tok-tag     { color: #79b8ff; }
+  .tok-attr    { color: #f9c46b; }
+  .tok-prop    { color: #f9c46b; }
+  .tok-punct   { color: var(--ghost); }
+
+  #cheatsheet {
+    position: fixed;
+    inset: 0;
+    background: rgba(26, 24, 21, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 100;
+    display: none;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    user-select: none;
+  }
+  #cheatsheet.visible { display: block; opacity: 1; }
+
+  @media (prefers-color-scheme: light) {
+    #cheatsheet { background: rgba(253, 250, 242, 0.94); }
+  }
+
+  #cheatsheet .cheatsheet-inner {
+    position: absolute;
+    inset: 64px max(96px, 12vw);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    align-content: start;
+    overflow-y: auto;
+  }
+  #cheatsheet h2 {
+    font-family: "Fraunces", "Iowan Old Style", "Charter", serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 22px;
+    margin: 0 0 18px 0;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  #cheatsheet ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--ink);
+  }
+  #cheatsheet li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 2px 0;
+  }
+  #cheatsheet kbd {
+    font-family: inherit;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--ghost);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  @media (prefers-color-scheme: light) {
+    #cheatsheet kbd { background: rgba(0, 0, 0, 0.04); }
+  }
+  #cheatsheet .desc { color: var(--ink); opacity: 0.85; }
+  #cheatsheet .footer {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--ghost);
+    font-size: 11px;
+    font-style: italic;
+    font-family: "Fraunces", "Iowan Old Style", "Charter", serif;
+  }
+
+  #updatebar {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: var(--bg);
+    border: 1px solid var(--ghost);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--ink);
+    cursor: pointer;
+    z-index: 50;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  #updatebar.visible { opacity: 1; }
+  #updatebar .x {
+    margin-left: 12px;
+    color: var(--ghost);
+    cursor: pointer;
+  }
+  #updatebar .x:hover { color: var(--ink); }
 </style>
 </head>
 <body>
+  <div id="findbar">
+    <input type="text" id="findinput" placeholder="Find" autocomplete="off" spellcheck="false">
+    <span id="findstatus"></span>
+    <button id="findclose">×</button>
+  </div>
+  <div id="updatebar" hidden>
+    <span id="updatemsg"></span>
+    <span class="x" id="updateclose">×</span>
+  </div>
   <div class="editor" id="editor">
     <div class="hint textbox" id="hint">Start writing…</div>
     <div class="render-layer textbox" id="render"></div>
@@ -114,6 +301,45 @@
               autocapitalize="off"
               wrap="soft"></textarea>
   </div>
+<div id="cheatsheet">
+  <div class="cheatsheet-inner">
+    <div>
+      <h2>Files</h2>
+      <ul>
+        <li><kbd>⌘N</kbd><span class="desc">New</span></li>
+        <li><kbd>⌘O</kbd><span class="desc">Open local</span></li>
+        <li><kbd>⌥⌘O</kbd><span class="desc">Open via SSH</span></li>
+        <li><kbd>⌘S</kbd><span class="desc">Save</span></li>
+        <li><kbd>⇧⌘S</kbd><span class="desc">Save As…</span></li>
+        <li><kbd>⌘W</kbd><span class="desc">Close window</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>Edit</h2>
+      <ul>
+        <li><kbd>⌘Z</kbd><span class="desc">Undo</span></li>
+        <li><kbd>⇧⌘Z</kbd><span class="desc">Redo</span></li>
+        <li><kbd>⌘X</kbd><span class="desc">Cut</span></li>
+        <li><kbd>⌘C</kbd><span class="desc">Copy</span></li>
+        <li><kbd>⌘V</kbd><span class="desc">Paste</span></li>
+        <li><kbd>⌘A</kbd><span class="desc">Select all</span></li>
+        <li><kbd>⌘F</kbd><span class="desc">Find in page</span></li>
+        <li><kbd>↵</kbd> / <kbd>⇧↵</kbd><span class="desc">Find next / previous</span></li>
+        <li><kbd>⎋</kbd><span class="desc">Close find</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>View</h2>
+      <ul>
+        <li><kbd>⌃⌘F</kbd><span class="desc">Toggle full screen</span></li>
+        <li><kbd>⌘M</kbd><span class="desc">Minimize</span></li>
+        <li><kbd>⌘?</kbd><span class="desc">This cheatsheet</span></li>
+        <li><kbd>⎋</kbd><span class="desc">Dismiss cheatsheet</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer">Less app. More page.</div>
+</div>
 <script>
   const $editor = document.getElementById('editor');
   const $render = document.getElementById('render');
@@ -132,9 +358,331 @@
     clean = false;
   }
 
-  // Replace render layer with a single Text node — minimum possible DOM.
+  // ── Syntax highlighting tokenizers ─────────────────────────────────────────
+
+  function tokenizeSwift(src) {
+    try {
+      const KW = /\b(func|let|var|if|else|guard|switch|case|default|return|struct|class|enum|protocol|extension|import|init|deinit|self|true|false|nil|throws|throw|try|do|catch|async|await|for|in|while|repeat|break|continue|where|public|private|internal|fileprivate|open|static|final|lazy|mutating|weak|unowned)\b/g;
+      return tokenizeGeneric(src, KW);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeJS(src) {
+    try {
+      const KW = /\b(function|const|let|var|if|else|for|while|do|return|switch|case|default|break|continue|new|this|class|extends|super|import|export|from|as|of|in|typeof|instanceof|async|await|try|catch|finally|throw|true|false|null|undefined|void|delete)\b/g;
+      return tokenizeGeneric(src, KW);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizePython(src) {
+    try {
+      const KW = /\b(def|class|if|elif|else|for|while|return|import|from|as|in|not|and|or|is|lambda|try|except|finally|raise|with|pass|break|continue|yield|global|nonlocal|async|await|True|False|None|self)\b/g;
+      return tokenizeGeneric(src, KW, true);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeBash(src) {
+    try {
+      const KW = /\b(if|then|else|elif|fi|for|while|do|done|case|esac|function|return|in|exit|break|continue|local|export|unset|read|echo|printf|cd|pwd|ls)\b/g;
+      return tokenizeGeneric(src, KW, false, true);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  // Generic tokenizer for Swift/JS/Python/Bash.
+  // pyTriple: enable triple-quoted strings; bashMode: no escape handling in strings.
+  function tokenizeGeneric(src, kwRe, pyTriple, bashMode) {
+    const toks = [];
+    let i = 0;
+    const n = src.length;
+    function flush(start) {
+      if (start < i) toks.push({type:'plain', text: src.slice(start, i)});
+    }
+    let plain = 0;
+    while (i < n) {
+      // Block comment /* ... */
+      if (src[i]==='/' && src[i+1]==='*') {
+        flush(plain); const s=i; i+=2;
+        while (i<n && !(src[i-1]==='*' && src[i]==='/')) i++;
+        i++; toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Line comment // ...
+      if (src[i]==='/' && src[i+1]==='/') {
+        flush(plain); const s=i; i+=2;
+        while (i<n && src[i]!=='\n') i++;
+        toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Hash comment (Python/Bash)
+      if ((pyTriple||bashMode) && src[i]==='#') {
+        flush(plain); const s=i; i++;
+        while (i<n && src[i]!=='\n') i++;
+        toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Triple-quoted strings (Python)
+      if (pyTriple && (src.slice(i,i+3)==='"""' || src.slice(i,i+3)==="'''")) {
+        flush(plain); const q=src.slice(i,i+3); const s=i; i+=3;
+        while (i<n && src.slice(i,i+3)!==q) i++;
+        i+=3; toks.push({type:'string', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Regular strings
+      if (src[i]==='"' || src[i]==="'" || src[i]==='`') {
+        flush(plain); const q=src[i]; const s=i; i++;
+        while (i<n && src[i]!==q && src[i]!=='\n') {
+          if (!bashMode && src[i]==='\\') i++;
+          i++;
+        }
+        if (i<n && src[i]===q) i++;
+        toks.push({type:'string', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Numbers
+      if (src[i]>='0' && src[i]<='9') {
+        flush(plain); const s=i;
+        while (i<n && (src[i]>='0'&&src[i]<='9'||src[i]==='.'||src[i]==='e'||src[i]==='E'||src[i]==='-'&&(src[i-1]==='e'||src[i-1]==='E'))) i++;
+        toks.push({type:'number', text:src.slice(s,i)}); plain=i; continue;
+      }
+      i++;
+    }
+    flush(plain);
+    // Second pass: tag keywords inside plain tokens
+    const out = [];
+    for (const t of toks) {
+      if (t.type !== 'plain') { out.push(t); continue; }
+      kwRe.lastIndex = 0;
+      let last = 0; let m;
+      while ((m = kwRe.exec(t.text)) !== null) {
+        if (m.index > last) out.push({type:'plain', text:t.text.slice(last, m.index)});
+        out.push({type:'keyword', text:m[0]});
+        last = m.index + m[0].length;
+      }
+      if (last < t.text.length) out.push({type:'plain', text:t.text.slice(last)});
+    }
+    return out;
+  }
+
+  function tokenizeHTML(src) {
+    try {
+      const toks = [];
+      let i = 0; const n = src.length;
+      function push(type, text) { if (text) toks.push({type, text}); }
+      while (i < n) {
+        // Comment
+        if (src.slice(i,i+4)==='<!--') {
+          const s=i; i+=4;
+          while (i<n && src.slice(i,i+3)!=='-->') i++;
+          i+=3; push('comment', src.slice(s,i)); continue;
+        }
+        if (src[i]==='<') {
+          push('punct','<'); i++;
+          const close = src[i]==='/' ? (push('punct','/'), i++, true) : false;
+          // Tag name
+          const ts=i; while (i<n && /[a-zA-Z0-9:_-]/.test(src[i])) i++;
+          push('tag', src.slice(ts,i));
+          // Attributes until > or />
+          while (i<n && src[i]!=='>') {
+            if (src.slice(i,i+2)==='/>') { push('punct','/>'); i+=2; break; }
+            // Whitespace
+            const ws=i; while (i<n && /\s/.test(src[i]) && src[i]!=='>') i++;
+            if (i>ws) push('plain', src.slice(ws,i));
+            if (src[i]==='>' || src[i]===undefined) break;
+            // Attr name
+            const as=i; while (i<n && !/[\s=>/]/.test(src[i])) i++;
+            push('attr', src.slice(as,i));
+            // =value
+            if (src[i]==='=') { push('punct','='); i++;
+              if (src[i]==='"'||src[i]==="'") {
+                const q=src[i]; const vs=i; i++;
+                while (i<n && src[i]!==q) i++;
+                i++; push('string', src.slice(vs,i));
+              } else {
+                const vs=i; while (i<n && !/[\s>]/.test(src[i])) i++;
+                push('attr', src.slice(vs,i));
+              }
+            }
+          }
+          if (i<n && src[i]==='>') { push('punct','>'); i++; }
+          continue;
+        }
+        // Plain text
+        const s=i; while (i<n && src[i]!=='<') i++;
+        push('plain', src.slice(s,i));
+      }
+      return toks;
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeCSS(src) {
+    try {
+      const toks = [];
+      let i = 0; const n = src.length;
+      // state: 'sel' | 'prop' | 'val' | 'nested-prop' | 'nested-val'
+      let state = 'sel'; let depth = 0;
+      function push(type, text) { if (text) toks.push({type, text}); }
+      function readString(q) {
+        const s=i; i++;
+        while (i<n && src[i]!==q) i++;
+        if (i<n) i++;
+        return src.slice(s,i);
+      }
+      let mark = 0;
+      function flush(to) { if (mark<to) push('plain', src.slice(mark,to)); mark=to; }
+      while (i < n) {
+        // Block comment
+        if (src.slice(i,i+2)==='/*') {
+          flush(i); const s=i; i+=2;
+          while (i<n && src.slice(i,i+2)!=='*/') i++;
+          i+=2; push('comment', src.slice(s,i)); mark=i; continue;
+        }
+        // Strings
+        if (src[i]==='"'||src[i]==="'") {
+          flush(i); push('string', readString(src[i])); mark=i; continue;
+        }
+        if (state==='sel' || state==='nested-sel') {
+          if (src[i]==='{') {
+            const sel=src.slice(mark,i).trim();
+            push('tag', sel); push('plain', ' ');
+            push('punct','{'); i++; mark=i;
+            depth++; state = depth===1 ? 'prop' : 'nested-prop';
+            continue;
+          }
+        } else if (state==='prop' || state==='nested-prop') {
+          if (src[i]==='}') {
+            flush(i); push('punct','}'); i++; mark=i;
+            depth--; state = depth===0 ? 'sel' : (depth===1 ? 'prop' : 'nested-prop');
+            continue;
+          }
+          if (src[i]==='{') {
+            // nested selector (e.g. @media)
+            const sel=src.slice(mark,i).trim();
+            if (sel) push('tag', sel);
+            push('plain',' '); push('punct','{'); i++; mark=i;
+            depth++; state='nested-prop'; continue;
+          }
+          if (src[i]===':') {
+            const prop=src.slice(mark,i).trim();
+            if (prop) push('prop', prop);
+            push('punct',':'); i++; mark=i;
+            state = state==='prop' ? 'val' : 'nested-val'; continue;
+          }
+        } else { // val / nested-val
+          if (src[i]===';') {
+            flush(i); push('punct',';'); i++; mark=i;
+            state = state==='val' ? 'prop' : 'nested-prop'; continue;
+          }
+          if (src[i]==='}') {
+            flush(i); push('punct','}'); i++; mark=i;
+            depth--;
+            state = depth===0 ? 'sel' : (depth===1 ? 'prop' : 'nested-prop');
+            continue;
+          }
+        }
+        i++;
+      }
+      flush(n);
+      return toks;
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  const tokenizers = {
+    swift: tokenizeSwift,
+    javascript: tokenizeJS, js: tokenizeJS,
+    python: tokenizePython, py: tokenizePython,
+    bash: tokenizeBash, sh: tokenizeBash,
+    html: tokenizeHTML,
+    css: tokenizeCSS,
+  };
+
+  // Build a <pre> for a recognized fence, preserving textContent equality.
+  function renderFence(opener, content, closer, lang, parent) {
+    const fn = tokenizers[lang];
+    if (!fn) { parent.appendChild(document.createTextNode(opener + content + closer)); return; }
+    const tokens = fn(content);
+    const pre = document.createElement('pre');
+    pre.className = 'hl hl-' + lang;
+    pre.appendChild(document.createTextNode(opener));
+    for (const tok of tokens) {
+      if (tok.type === 'plain') {
+        pre.appendChild(document.createTextNode(tok.text));
+      } else {
+        const span = document.createElement('span');
+        span.className = 'tok-' + tok.type;
+        span.textContent = tok.text;
+        pre.appendChild(span);
+      }
+    }
+    pre.appendChild(document.createTextNode(closer));
+    parent.appendChild(pre);
+  }
+
+  // Walk text, splitting on triple-backtick fences, apply syntax highlighting.
+  // Falls back to a plain Text node for unrecognized/no-lang fences.
+  // INVARIANT: $render.textContent === text after this call.
+  function setRenderTextWithSyntax(text) {
+    while ($render.firstChild) $render.removeChild($render.firstChild);
+    // Fast path: no fences present.
+    if (text.indexOf('```') === -1) {
+      $render.appendChild(document.createTextNode(text));
+      return;
+    }
+    const lines = text.split('\n');
+    let i = 0; let plainStart = 0; let pos = 0;
+    // pos tracks char offset into `text` (including newlines)
+    const lineOffsets = [];
+    let off = 0;
+    for (const l of lines) { lineOffsets.push(off); off += l.length + 1; }
+
+    while (i < lines.length) {
+      const m = lines[i].match(/^```([a-z0-9+#-]*)\s*$/);
+      if (m !== null) {
+        // Emit plain text before this fence
+        const fenceStartChar = lineOffsets[i];
+        if (fenceStartChar > plainStart) {
+          $render.appendChild(document.createTextNode(text.slice(plainStart, fenceStartChar)));
+        }
+        const lang = m[1] || '';
+        const openerLine = lines[i];
+        const openerChar = lineOffsets[i];
+        // Find closing ```
+        let j = i + 1;
+        while (j < lines.length && lines[j].match(/^```\s*$/) === null) j++;
+        if (j >= lines.length) {
+          // No closing fence — emit rest as plain and stop
+          $render.appendChild(document.createTextNode(text.slice(fenceStartChar)));
+          return;
+        }
+        const closerLine = lines[j];
+        const closerCharStart = lineOffsets[j];
+        const closerCharEnd = lineOffsets[j] + closerLine.length + (j < lines.length - 1 ? 1 : 0);
+        // opener includes its trailing newline; content is lines i+1..j-1; closer is the closing line
+        const opener = text.slice(openerChar, lineOffsets[i+1] !== undefined ? lineOffsets[i+1] : openerChar + openerLine.length);
+        // content: from after opener line to just before closing line
+        const contentStart = lineOffsets[i] + openerLine.length + 1;
+        const contentEnd   = lineOffsets[j];
+        const content = text.slice(contentStart, contentEnd);
+        // closer: the closing ``` line, including trailing newline if present
+        const closer = text.slice(lineOffsets[j], closerCharEnd);
+
+        if (lang && tokenizers[lang]) {
+          renderFence(opener, content, closer, lang, $render);
+        } else {
+          $render.appendChild(document.createTextNode(opener + content + closer));
+        }
+        plainStart = closerCharEnd;
+        i = j + 1;
+      } else {
+        i++;
+      }
+    }
+    // Remaining plain text after last fence
+    if (plainStart < text.length) {
+      $render.appendChild(document.createTextNode(text.slice(plainStart)));
+    }
+  }
+
+  // ── End Syntax highlighting ─────────────────────────────────────────────────
+
+  // Replace render layer with syntax-highlighted nodes (or a single Text node
+  // when there are no recognized fences — same fast path as v2).
   function setRenderText(text) {
-    $render.textContent = text;
+    setRenderTextWithSyntax(text);
   }
 
   // Lay out: [text before cursor] + [fresh span] + [text after cursor].
@@ -175,6 +723,7 @@
 
   $input.addEventListener('input', (e) => {
     const want = $input.value;
+    if (find.active) { find.close(); }
     // Animate single-character insertText only. Paste, autocomplete, delete,
     // and any composition event take the snap path.
     if (e.inputType === 'insertText' && e.data && e.data.length === 1) {
@@ -211,6 +760,278 @@
     getContent() { return $input.value; },
     markClean() { clean = true; }
   };
+
+  // ── Find-in-page ────────────────────────────────────────────────────────────
+  const $findbar    = document.getElementById('findbar');
+  const $findinput  = document.getElementById('findinput');
+  const $findstatus = document.getElementById('findstatus');
+  const $findclose  = document.getElementById('findclose');
+
+  const find = {
+    active: false,
+    matches: [],
+    current: -1,
+    query: '',
+
+    open() {
+      find.active = true;
+      document.body.classList.add('has-find');
+      $findbar.classList.add('visible');
+      const sel = $input.value.slice($input.selectionStart, $input.selectionEnd);
+      if (sel) $findinput.value = sel;
+      $findinput.focus();
+      $findinput.select();
+      find.setQuery($findinput.value);
+    },
+
+    close() {
+      find.active = false;
+      document.body.classList.remove('has-find');
+      $findbar.classList.remove('visible');
+      if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
+      setRenderText($input.value);
+      resizeTextarea();
+      $input.focus();
+    },
+
+    setQuery(q) {
+      find.query = q;
+      find.matches = [];
+      if (q.length > 0) {
+        const text = $input.value;
+        const lower = text.toLowerCase();
+        const lq = q.toLowerCase();
+        let i = 0;
+        while (i <= lower.length - lq.length) {
+          const idx = lower.indexOf(lq, i);
+          if (idx === -1) break;
+          find.matches.push({ start: idx, end: idx + lq.length });
+          i = idx + lq.length;
+        }
+      }
+      find.current = find.matches.length > 0 ? 0 : -1;
+      find.updateStatus();
+      find.highlight();
+    },
+
+    next() {
+      if (find.matches.length === 0) return;
+      find.current = (find.current + 1) % find.matches.length;
+      find.highlight();
+    },
+
+    prev() {
+      if (find.matches.length === 0) return;
+      find.current = (find.current - 1 + find.matches.length) % find.matches.length;
+      find.highlight();
+    },
+
+    updateStatus() {
+      if (find.query === '') {
+        $findstatus.textContent = '';
+      } else if (find.matches.length === 0) {
+        $findstatus.textContent = 'no matches';
+      } else {
+        $findstatus.textContent = (find.current + 1) + ' of ' + find.matches.length;
+      }
+    },
+
+    highlight() {
+      while ($render.firstChild) $render.removeChild($render.firstChild);
+      const text = $input.value;
+      if (find.matches.length === 0) {
+        $render.appendChild(document.createTextNode(text));
+        find.updateStatus();
+        return;
+      }
+      let pos = 0;
+      for (let i = 0; i < find.matches.length; i++) {
+        const m = find.matches[i];
+        if (m.start > pos) {
+          $render.appendChild(document.createTextNode(text.slice(pos, m.start)));
+        }
+        const mark = document.createElement('mark');
+        if (i === find.current) mark.classList.add('mark-current');
+        mark.textContent = text.slice(m.start, m.end);
+        $render.appendChild(mark);
+        pos = m.end;
+      }
+      if (pos < text.length) {
+        $render.appendChild(document.createTextNode(text.slice(pos)));
+      }
+      find.updateStatus();
+      if (find.current >= 0) {
+        const currentMark = $render.querySelector('mark.mark-current');
+        if (currentMark) currentMark.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
+    }
+  };
+
+  window.find_open = () => find.open();
+
+  $findinput.addEventListener('input', () => find.setQuery($findinput.value));
+  $findclose.addEventListener('click', () => find.close());
+
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey && e.key === 'f') {
+      e.preventDefault();
+      find.open();
+      return;
+    }
+    if (find.active) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        find.close();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.shiftKey) find.prev(); else find.next();
+        return;
+      }
+    }
+  });
+  // ── End Find-in-page ────────────────────────────────────────────────────────
+
+  // ── Update banner ──────────────────────────────────────────────────────────
+  const $updatebar   = document.getElementById('updatebar');
+  const $updatemsg   = document.getElementById('updatemsg');
+  const $updateclose = document.getElementById('updateclose');
+
+  window.update_show = (tag, url) => {
+    $updatemsg.textContent = tag + ' is out  ↗';
+    $updatebar.setAttribute('data-url', url);
+    $updatebar.removeAttribute('hidden');
+    // Force reflow so the transition fires from opacity:0
+    void $updatebar.offsetWidth;
+    $updatebar.classList.add('visible');
+  };
+
+  $updatebar.addEventListener('click', (e) => {
+    if (e.target === $updateclose) return;
+    const url = $updatebar.getAttribute('data-url');
+    if (url && window.webkit && window.webkit.messageHandlers.openURL) {
+      window.webkit.messageHandlers.openURL.postMessage(url);
+    }
+  });
+
+  $updateclose.addEventListener('click', (e) => {
+    e.stopPropagation();
+    $updatebar.classList.remove('visible');
+    setTimeout(() => { $updatebar.setAttribute('hidden', ''); }, 200);
+  });
+  // ── End Update banner ──────────────────────────────────────────────────────
+
+  // ── Cheatsheet ─────────────────────────────────────────────────────────────
+  const $cheatsheet = document.getElementById('cheatsheet');
+
+  window.cheatsheet_open = () => {
+    $cheatsheet.classList.add('visible');
+  };
+
+  const closeCheatsheet = () => {
+    $cheatsheet.classList.remove('visible');
+  };
+
+  document.addEventListener('keydown', (e) => {
+    // Open with Cmd-? (which is Cmd-Shift-/)
+    if (e.metaKey && e.shiftKey && e.key === '?') {
+      e.preventDefault();
+      window.cheatsheet_open();
+      return;
+    }
+    // Dismiss with Esc when visible
+    if ($cheatsheet.classList.contains('visible') && e.key === 'Escape') {
+      e.preventDefault();
+      closeCheatsheet();
+      return;
+    }
+  });
+
+  // Click on backdrop dismisses; click on inner content does NOT propagate.
+  $cheatsheet.addEventListener('click', (e) => {
+    if (e.target === $cheatsheet) closeCheatsheet();
+  });
+  // ── End Cheatsheet ─────────────────────────────────────────────────────────
+
+  // ── Smarter paste ───────────────────────────────────────────────────────────
+  function walk(node) {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.nodeType !== 1) return '';
+    const inner = Array.from(node.childNodes).map(walk).join('');
+    const tag = node.tagName.toLowerCase();
+    switch (tag) {
+      case 'a': {
+        const href = node.getAttribute('href') || '';
+        return href ? `[${inner}](${href})` : inner;
+      }
+      case 'strong': case 'b':   return `**${inner}**`;
+      case 'em':     case 'i':   return `*${inner}*`;
+      case 'code':               return '`' + inner + '`';
+      case 'br':                 return '\n';
+      case 'p': case 'div':      return inner + (inner.endsWith('\n') ? '' : '\n');
+      default:                   return inner;
+    }
+  }
+
+  function htmlToMarkdown(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return walk(tmp);
+  }
+
+  $input.addEventListener('paste', (e) => {
+    if (find.active && document.activeElement !== $input) return;
+    const cd = e.clipboardData;
+    if (!cd) return;
+
+    const html = cd.getData('text/html');
+    let text = (html && html.trim()) ? htmlToMarkdown(html) : cd.getData('text/plain');
+    if (!text) return;
+
+    const trimmed = text.trim();
+    const selStart = $input.selectionStart;
+    const selEnd   = $input.selectionEnd;
+    const hasSelection = selEnd > selStart;
+
+    if (/^https?:\/\/\S+$/.test(trimmed) && hasSelection) {
+      // Rule 2: URL pasted over a selection → wrap as markdown link.
+      const sel = $input.value.slice(selStart, selEnd);
+      text = `[${sel}](${trimmed})`;
+    } else if (text.includes('\n')) {
+      // Rule 3: multi-line paste into a list line → continue bullets/numbers.
+      const beforeCursor = $input.value.slice(0, selStart);
+      const lineStart    = beforeCursor.lastIndexOf('\n') + 1;
+      const currentLine  = beforeCursor.slice(lineStart);
+      const ulMatch = currentLine.match(/^(\s*)([-*+])\s+/);
+      const olMatch = currentLine.match(/^(\s*)(\d+)\.\s+/);
+      if (ulMatch || olMatch) {
+        const indent = (ulMatch || olMatch)[1];
+        const lines  = text.split('\n');
+        if (olMatch) {
+          let n = parseInt(olMatch[2], 10) + 1;
+          for (let i = 1; i < lines.length; i++) {
+            lines[i] = indent + (n++) + '. ' + lines[i];
+          }
+        } else {
+          const bullet = ulMatch[2];
+          for (let i = 1; i < lines.length; i++) {
+            lines[i] = indent + bullet + ' ' + lines[i];
+          }
+        }
+        text = lines.join('\n');
+      }
+    }
+
+    e.preventDefault();
+    const before = $input.value.slice(0, selStart);
+    const after  = $input.value.slice(selEnd);
+    $input.value = before + text + after;
+    const newPos = selStart + text.length;
+    $input.setSelectionRange(newPos, newPos);
+    $input.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', data: null }));
+  });
+  // ── End Smarter paste ────────────────────────────────────────────────────────
 
   if (native && native.ready) native.ready.postMessage(true);
 
