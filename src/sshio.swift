@@ -150,6 +150,10 @@ enum SSHIO {
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=15",
+            // Reuse existing TCP+auth connection; %C hashes (local_user,host,port,remote_user).
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=/tmp/plume-%C",
+            "-o", "ControlPersist=600",
             target
         ]
     }
