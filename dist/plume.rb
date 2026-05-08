@@ -6,8 +6,8 @@ cask "plume" do
   # Update `version` and replace the `sha256` placeholder with the
   # output of:  shasum -a 256 Plume.dmg
 
-  version "2.5.0"
-  sha256 "8879e5ec467f57dcff3a026a3b166de8a1352ffb6ae729ac54f4c7b5a79adfe6"
+  version "2.6.0"
+  sha256 "0e5e18b075596f6108010dabbd8bf55a80f4128ad8d575842bda47f05dc1b756"
 
   url "https://github.com/zabrodsk/plume/releases/download/v#{version}/Plume.dmg"
   name "Plume"

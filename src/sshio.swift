@@ -301,10 +301,10 @@ enum SSHIO {
             guard firstChar == "-" || firstChar == "d" || firstChar == "l" else { continue }
             // Name is the last whitespace-separated field (after the time field).
             guard let name = extractName(from: trimmed, isLong: true) else { continue }
-            if name == "." || name == ".." { continue }
-            if name.hasPrefix(".") { continue }  // hide dotfiles for v2.5
             let isDir = name.hasSuffix("/") || firstChar == "d"
             let cleanName = name.hasSuffix("/") ? String(name.dropLast()) : name
+            if cleanName == "." || cleanName == ".." { continue }
+            if cleanName.hasPrefix(".") && !isDir { continue }
             entries.append(BrowseEntry(name: cleanName, isDirectory: isDir))
         }
         return entries
@@ -316,10 +316,10 @@ enum SSHIO {
         for line in output.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            if trimmed == "." || trimmed == ".." || trimmed == "./" || trimmed == "../" { continue }
-            if trimmed.hasPrefix(".") { continue }  // hide dotfiles
             let isDir = trimmed.hasSuffix("/")
             let cleanName = isDir ? String(trimmed.dropLast()) : trimmed
+            if cleanName == "." || cleanName == ".." { continue }
+            if cleanName.hasPrefix(".") && !isDir { continue }
             entries.append(BrowseEntry(name: cleanName, isDirectory: isDir))
         }
         return entries
