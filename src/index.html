@@ -399,6 +399,85 @@
   });
   // ── End Find-in-page ────────────────────────────────────────────────────────
 
+  // ── Smarter paste ───────────────────────────────────────────────────────────
+  function walk(node) {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.nodeType !== 1) return '';
+    const inner = Array.from(node.childNodes).map(walk).join('');
+    const tag = node.tagName.toLowerCase();
+    switch (tag) {
+      case 'a': {
+        const href = node.getAttribute('href') || '';
+        return href ? `[${inner}](${href})` : inner;
+      }
+      case 'strong': case 'b':   return `**${inner}**`;
+      case 'em':     case 'i':   return `*${inner}*`;
+      case 'code':               return '`' + inner + '`';
+      case 'br':                 return '\n';
+      case 'p': case 'div':      return inner + (inner.endsWith('\n') ? '' : '\n');
+      default:                   return inner;
+    }
+  }
+
+  function htmlToMarkdown(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return walk(tmp);
+  }
+
+  $input.addEventListener('paste', (e) => {
+    if (find.active && document.activeElement !== $input) return;
+    const cd = e.clipboardData;
+    if (!cd) return;
+
+    const html = cd.getData('text/html');
+    let text = (html && html.trim()) ? htmlToMarkdown(html) : cd.getData('text/plain');
+    if (!text) return;
+
+    const trimmed = text.trim();
+    const selStart = $input.selectionStart;
+    const selEnd   = $input.selectionEnd;
+    const hasSelection = selEnd > selStart;
+
+    if (/^https?:\/\/\S+$/.test(trimmed) && hasSelection) {
+      // Rule 2: URL pasted over a selection → wrap as markdown link.
+      const sel = $input.value.slice(selStart, selEnd);
+      text = `[${sel}](${trimmed})`;
+    } else if (text.includes('\n')) {
+      // Rule 3: multi-line paste into a list line → continue bullets/numbers.
+      const beforeCursor = $input.value.slice(0, selStart);
+      const lineStart    = beforeCursor.lastIndexOf('\n') + 1;
+      const currentLine  = beforeCursor.slice(lineStart);
+      const ulMatch = currentLine.match(/^(\s*)([-*+])\s+/);
+      const olMatch = currentLine.match(/^(\s*)(\d+)\.\s+/);
+      if (ulMatch || olMatch) {
+        const indent = (ulMatch || olMatch)[1];
+        const lines  = text.split('\n');
+        if (olMatch) {
+          let n = parseInt(olMatch[2], 10) + 1;
+          for (let i = 1; i < lines.length; i++) {
+            lines[i] = indent + (n++) + '. ' + lines[i];
+          }
+        } else {
+          const bullet = ulMatch[2];
+          for (let i = 1; i < lines.length; i++) {
+            lines[i] = indent + bullet + ' ' + lines[i];
+          }
+        }
+        text = lines.join('\n');
+      }
+    }
+
+    e.preventDefault();
+    const before = $input.value.slice(0, selStart);
+    const after  = $input.value.slice(selEnd);
+    $input.value = before + text + after;
+    const newPos = selStart + text.length;
+    $input.setSelectionRange(newPos, newPos);
+    $input.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', data: null }));
+  });
+  // ── End Smarter paste ────────────────────────────────────────────────────────
+
   if (native && native.ready) native.ready.postMessage(true);
 
   resizeTextarea();
