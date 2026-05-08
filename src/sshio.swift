@@ -62,6 +62,20 @@ struct SSHPath: Equatable {
     }
 }
 
+// MARK: - SSH task (cancellation handle)
+
+/// Calling cancel() sends SIGTERM to the underlying ssh subprocess, which causes
+/// the completion handler to fire with .failure(SSHError.cancelled) shortly after.
+final class SSHTask {
+    private weak var process: Process?
+    private(set) var isCancelled: Bool = false
+    init(process: Process) { self.process = process }
+    func cancel() {
+        isCancelled = true
+        process?.terminate()
+    }
+}
+
 // MARK: - SSH I/O
 
 /// Shells out to /usr/bin/ssh. Zero bundled dependencies.
@@ -69,6 +83,7 @@ enum SSHIO {
     enum SSHError: LocalizedError {
         case nonZeroExit(code: Int32, stderr: String)
         case decodeFailed
+        case cancelled
 
         var errorDescription: String? {
             switch self {
@@ -78,26 +93,38 @@ enum SSHIO {
                 return "ssh exited with code \(c): \(trimmed)"
             case .decodeFailed:
                 return "Remote file is not valid UTF-8."
+            case .cancelled:
+                return "Cancelled."
             }
         }
     }
 
-    /// Read remote text file via `ssh host cat`.
-    static func read(_ remote: SSHPath, completion: @escaping (Result<String, Error>) -> Void) {
+    /// Read remote text file via `ssh host cat`. Returns an SSHTask that can cancel
+    /// the in-flight subprocess.
+    @discardableResult
+    static func read(_ remote: SSHPath, completion: @escaping (Result<String, Error>) -> Void) -> SSHTask {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        proc.arguments = sshArgs(for: remote.sshTarget) + [
+            "cat", "--", shellQuote(remote.path)
+        ]
+
+        let outPipe = Pipe(); let errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+
+        let task = SSHTask(process: proc)
+
         DispatchQueue.global(qos: .userInitiated).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            proc.arguments = sshArgs(for: remote.sshTarget) + [
-                "cat", "--", shellQuote(remote.path)
-            ]
-
-            let outPipe = Pipe(); let errPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = errPipe
-
             do {
                 try proc.run()
                 proc.waitUntilExit()
+
+                if task.isCancelled {
+                    completion(.failure(SSHError.cancelled))
+                    return
+                }
+
                 let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
 
@@ -115,6 +142,8 @@ enum SSHIO {
                 completion(.failure(error))
             }
         }
+
+        return task
     }
 
     /// Write remote text file atomically (write to .tmp, then mv).
@@ -201,6 +230,46 @@ enum SSHIO {
         }
         let sep = base.hasSuffix("/") ? "" : "/"
         return base + sep + component
+    }
+
+    /// Map a raw SSH error into a human-readable (title, body) pair for NSAlert.
+    static func describe(error: Error, host: String, path: String?) -> (title: String, body: String) {
+        let location: String = {
+            if let p = path { return "\(host):\(p)" }
+            return host
+        }()
+
+        if let sshErr = error as? SSHError {
+            switch sshErr {
+            case .cancelled:
+                return ("Cancelled", "")
+            case .decodeFailed:
+                return ("Encoding error", "Remote file is not valid UTF-8.")
+            case .nonZeroExit(_, let stderr):
+                if stderr.range(of: "permission denied", options: .caseInsensitive) != nil {
+                    return ("Permission denied", location)
+                }
+                if stderr.range(of: "no such file or directory", options: .caseInsensitive) != nil {
+                    return ("File not found", location)
+                }
+                if stderr.range(of: "connection timed out", options: .caseInsensitive) != nil ||
+                   stderr.range(of: "operation timed out", options: .caseInsensitive) != nil {
+                    return ("Connection timed out", "Couldn't reach \(host).")
+                }
+                if stderr.range(of: "could not resolve hostname", options: .caseInsensitive) != nil ||
+                   stderr.range(of: "name or service not known", options: .caseInsensitive) != nil {
+                    return ("Host unreachable", "\(host) — DNS lookup failed.")
+                }
+                if stderr.range(of: "connection refused", options: .caseInsensitive) != nil {
+                    return ("Connection refused", "\(host) — is sshd running?")
+                }
+                if stderr.range(of: "host key verification failed", options: .caseInsensitive) != nil {
+                    return ("Host key mismatch", "\(host) — your ~/.ssh/known_hosts may need updating.")
+                }
+            }
+        }
+
+        return ("SSH error", error.localizedDescription)
     }
 
     // Run ls with the given pre-built argument list; returns nil if ssh exits non-zero.

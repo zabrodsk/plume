@@ -4,6 +4,91 @@ import UniformTypeIdentifiers
 
 // FileSource, SSHPath, SSHIO live in sshio.swift.
 
+// MARK: - Progress overlay
+
+/// Small non-modal overlay anchored to the bottom-right of a parent view.
+/// Shows a loading message and a Cancel button. Fades in after being added.
+final class ProgressOverlay {
+    private let view: NSView
+    private weak var parent: NSView?
+
+    init(parent: NSView, message: String, onCancel: @escaping () -> Void) {
+        self.parent = parent
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 0.90).cgColor
+        container.layer?.cornerRadius = 8
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField(labelWithString: message)
+        label.textColor = NSColor(red: 0.910, green: 0.894, blue: 0.847, alpha: 1.0)
+        label.font = NSFont.systemFont(ofSize: 12)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let cancelBtn = NSButton(title: "Cancel", target: nil, action: nil)
+        cancelBtn.bezelStyle = .recessed
+        cancelBtn.isBordered = false
+        cancelBtn.contentTintColor = NSColor(red: 0.910, green: 0.894, blue: 0.847, alpha: 0.75)
+        cancelBtn.font = NSFont.systemFont(ofSize: 12)
+        cancelBtn.translatesAutoresizingMaskIntoConstraints = false
+        cancelBtn.onAction { onCancel() }
+
+        container.addSubview(label)
+        container.addSubview(cancelBtn)
+
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(equalToConstant: 44),
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
+
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: cancelBtn.leadingAnchor, constant: -8),
+
+            cancelBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            cancelBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+
+        self.view = container
+        parent.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16),
+            container.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -16),
+        ])
+
+        // Fade in
+        container.layer?.opacity = 0
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.15
+        fade.fillMode = .forwards
+        fade.isRemovedOnCompletion = false
+        container.layer?.add(fade, forKey: "fadeIn")
+        container.layer?.opacity = 1
+    }
+
+    func dismiss() {
+        view.removeFromSuperview()
+    }
+}
+
+// Helper to attach an action closure to NSButton without a target/selector dance.
+private enum AssociatedKeys {
+    static var action: UInt8 = 0
+}
+private extension NSButton {
+    func onAction(_ block: @escaping () -> Void) {
+        objc_setAssociatedObject(self, &AssociatedKeys.action, block as AnyObject, .OBJC_ASSOCIATION_RETAIN)
+        target = self
+        action = #selector(runAction)
+    }
+    @objc private func runAction() {
+        (objc_getAssociatedObject(self, &AssociatedKeys.action) as? () -> Void)?()
+    }
+}
+
 // MARK: - App delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, NSWindowDelegate, NSMenuDelegate {
@@ -16,6 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var pendingRemoteToOpen: SSHPath?
     var jsReady: Bool = false
     var browseController: BrowseWindowController?
+
+    private var currentReadTask: SSHTask?
+    private var progressOverlay: ProgressOverlay?
+    private var escMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
@@ -250,26 +339,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func loadRemote(_ remote: SSHPath) {
-        // Optimistically show progress in title; actual content fills in async.
         window.title = "Loading \(remote.display)…"
-        SSHIO.read(remote) { [weak self] result in
+
+        // Install an Esc key monitor while the read is in flight.
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.currentReadTask != nil else { return event }
+            if event.keyCode == 53 {  // Esc
+                self.currentReadTask?.cancel()
+                return nil
+            }
+            return event
+        }
+
+        let task = SSHIO.read(remote) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.dismissReadProgress()
                 switch result {
                 case .success(let content):
                     self.currentFile = .remote(remote)
                     self.isDirty = false
                     self.sendContentToEditor(content, displayPath: remote.display)
                     self.updateTitle()
-                    // Register in Open Recent using a synthetic plume-ssh:// URL.
                     if let url = self.recentURL(for: remote) {
                         NSDocumentController.shared.noteNewRecentDocumentURL(url)
                     }
                 case .failure(let err):
                     self.updateTitle()
-                    self.showError("SSH read failed: \(err.localizedDescription)")
+                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError { return }
+                    self.showSSHError(err, host: remote.host, path: remote.path)
                 }
             }
+        }
+        currentReadTask = task
+
+        // Show the overlay after 250 ms — skip it entirely if the read is already done.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self, self.currentReadTask != nil,
+                  let contentView = self.window.contentView else { return }
+            let pathDisplay = (remote.path as NSString).lastPathComponent.isEmpty
+                ? remote.path
+                : (remote.path as NSString).lastPathComponent
+            let msg = "Loading \(remote.host):\(pathDisplay)…"
+            self.progressOverlay = ProgressOverlay(
+                parent: contentView,
+                message: msg,
+                onCancel: { [weak self] in self?.currentReadTask?.cancel() }
+            )
+        }
+    }
+
+    private func dismissReadProgress() {
+        progressOverlay?.dismiss()
+        progressOverlay = nil
+        currentReadTask = nil
+        if let monitor = escMonitor {
+            NSEvent.removeMonitor(monitor)
+            escMonitor = nil
         }
     }
 
@@ -339,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                             self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
                             self.updateTitle()
                         case .failure(let err):
-                            self.showError("SSH save failed: \(err.localizedDescription)")
+                            self.showSSHError(err, host: remote.host, path: remote.path)
                         }
                     }
                 }
@@ -394,7 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                                 self.updateTitle()
                                 proceed()
                             case .failure(let err):
-                                self.showError("SSH save failed: \(err.localizedDescription)")
+                                self.showSSHError(err, host: remote.host, path: remote.path)
                             }
                         }
                     }
@@ -449,6 +575,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let alert = NSAlert()
         alert.messageText = "Error"
         alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+
+    private func showSSHError(_ error: Error, host: String, path: String?) {
+        let info = SSHIO.describe(error: error, host: host, path: path)
+        let alert = NSAlert()
+        alert.messageText = info.title
+        alert.informativeText = info.body
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window, completionHandler: nil)
     }
@@ -567,7 +702,6 @@ final class BrowseWindowController: NSWindowController, NSTableViewDataSource, N
         win.minSize = NSSize(width: 320, height: 240)
         win.isReleasedWhenClosed = false
         super.init(window: win)
-        win.delegate = self as? NSWindowDelegate
 
         buildUI()
         loadDirectory()
