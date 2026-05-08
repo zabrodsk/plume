@@ -180,6 +180,81 @@
   .tok-prop    { color: #f9c46b; }
   .tok-punct   { color: var(--ghost); }
 
+  #cheatsheet {
+    position: fixed;
+    inset: 0;
+    background: rgba(26, 24, 21, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 100;
+    display: none;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    user-select: none;
+  }
+  #cheatsheet.visible { display: block; opacity: 1; }
+
+  @media (prefers-color-scheme: light) {
+    #cheatsheet { background: rgba(253, 250, 242, 0.94); }
+  }
+
+  #cheatsheet .cheatsheet-inner {
+    position: absolute;
+    inset: 64px max(96px, 12vw);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    align-content: start;
+    overflow-y: auto;
+  }
+  #cheatsheet h2 {
+    font-family: "Fraunces", "Iowan Old Style", "Charter", serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 22px;
+    margin: 0 0 18px 0;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  #cheatsheet ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--ink);
+  }
+  #cheatsheet li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 2px 0;
+  }
+  #cheatsheet kbd {
+    font-family: inherit;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--ghost);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  @media (prefers-color-scheme: light) {
+    #cheatsheet kbd { background: rgba(0, 0, 0, 0.04); }
+  }
+  #cheatsheet .desc { color: var(--ink); opacity: 0.85; }
+  #cheatsheet .footer {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--ghost);
+    font-size: 11px;
+    font-style: italic;
+    font-family: "Fraunces", "Iowan Old Style", "Charter", serif;
+  }
+
   #updatebar {
     position: fixed;
     bottom: 16px;
@@ -226,6 +301,45 @@
               autocapitalize="off"
               wrap="soft"></textarea>
   </div>
+<div id="cheatsheet">
+  <div class="cheatsheet-inner">
+    <div>
+      <h2>Files</h2>
+      <ul>
+        <li><kbd>⌘N</kbd><span class="desc">New</span></li>
+        <li><kbd>⌘O</kbd><span class="desc">Open local</span></li>
+        <li><kbd>⌥⌘O</kbd><span class="desc">Open via SSH</span></li>
+        <li><kbd>⌘S</kbd><span class="desc">Save</span></li>
+        <li><kbd>⇧⌘S</kbd><span class="desc">Save As…</span></li>
+        <li><kbd>⌘W</kbd><span class="desc">Close window</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>Edit</h2>
+      <ul>
+        <li><kbd>⌘Z</kbd><span class="desc">Undo</span></li>
+        <li><kbd>⇧⌘Z</kbd><span class="desc">Redo</span></li>
+        <li><kbd>⌘X</kbd><span class="desc">Cut</span></li>
+        <li><kbd>⌘C</kbd><span class="desc">Copy</span></li>
+        <li><kbd>⌘V</kbd><span class="desc">Paste</span></li>
+        <li><kbd>⌘A</kbd><span class="desc">Select all</span></li>
+        <li><kbd>⌘F</kbd><span class="desc">Find in page</span></li>
+        <li><kbd>↵</kbd> / <kbd>⇧↵</kbd><span class="desc">Find next / previous</span></li>
+        <li><kbd>⎋</kbd><span class="desc">Close find</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>View</h2>
+      <ul>
+        <li><kbd>⌃⌘F</kbd><span class="desc">Toggle full screen</span></li>
+        <li><kbd>⌘M</kbd><span class="desc">Minimize</span></li>
+        <li><kbd>⌘?</kbd><span class="desc">This cheatsheet</span></li>
+        <li><kbd>⎋</kbd><span class="desc">Dismiss cheatsheet</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer">Less app. More page.</div>
+</div>
 <script>
   const $editor = document.getElementById('editor');
   const $render = document.getElementById('render');
@@ -807,6 +921,38 @@
     setTimeout(() => { $updatebar.setAttribute('hidden', ''); }, 200);
   });
   // ── End Update banner ──────────────────────────────────────────────────────
+
+  // ── Cheatsheet ─────────────────────────────────────────────────────────────
+  const $cheatsheet = document.getElementById('cheatsheet');
+
+  window.cheatsheet_open = () => {
+    $cheatsheet.classList.add('visible');
+  };
+
+  const closeCheatsheet = () => {
+    $cheatsheet.classList.remove('visible');
+  };
+
+  document.addEventListener('keydown', (e) => {
+    // Open with Cmd-? (which is Cmd-Shift-/)
+    if (e.metaKey && e.shiftKey && e.key === '?') {
+      e.preventDefault();
+      window.cheatsheet_open();
+      return;
+    }
+    // Dismiss with Esc when visible
+    if ($cheatsheet.classList.contains('visible') && e.key === 'Escape') {
+      e.preventDefault();
+      closeCheatsheet();
+      return;
+    }
+  });
+
+  // Click on backdrop dismisses; click on inner content does NOT propagate.
+  $cheatsheet.addEventListener('click', (e) => {
+    if (e.target === $cheatsheet) closeCheatsheet();
+  });
+  // ── End Cheatsheet ─────────────────────────────────────────────────────────
 
   // ── Smarter paste ───────────────────────────────────────────────────────────
   function walk(node) {

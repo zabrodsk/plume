@@ -358,6 +358,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         mainMenu.addItem(windowMenuItem)
         NSApp.windowsMenu = windowMenu
 
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let cheatsheetItem = NSMenuItem(title: "Plume Cheatsheet",
+                                        action: #selector(showCheatsheet),
+                                        keyEquivalent: "?")
+        cheatsheetItem.keyEquivalentModifierMask = [.command, .shift]
+        helpMenu.addItem(cheatsheetItem)
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+        NSApp.helpMenu = helpMenu
+
         NSApp.mainMenu = mainMenu
     }
 
@@ -367,6 +378,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     @objc func performFind() {
         webView.evaluateJavaScript("window.find_open && window.find_open()")
+    }
+
+    @objc func showCheatsheet() {
+        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
     }
 
     @objc func newFile() {
