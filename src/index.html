@@ -149,6 +149,17 @@
 
   mark { background: rgba(255, 235, 99, 0.30); color: var(--ink); padding: 0; }
   mark.mark-current { background: rgba(255, 235, 99, 0.55); }
+
+  /* Syntax highlighting */
+  .hl { background: rgba(255,255,255,0.025); padding: 8px 12px; border-radius: 4px; margin: 8px 0; display: block; white-space: pre-wrap; }
+  .tok-keyword { color: #c594c5; }
+  .tok-string  { color: #a3be8c; }
+  .tok-number  { color: #d08770; }
+  .tok-comment { color: #6a6660; font-style: italic; }
+  .tok-tag     { color: #79b8ff; }
+  .tok-attr    { color: #f9c46b; }
+  .tok-prop    { color: #f9c46b; }
+  .tok-punct   { color: var(--ghost); }
 </style>
 </head>
 <body>
@@ -186,9 +197,331 @@
     clean = false;
   }
 
-  // Replace render layer with a single Text node — minimum possible DOM.
+  // ── Syntax highlighting tokenizers ─────────────────────────────────────────
+
+  function tokenizeSwift(src) {
+    try {
+      const KW = /\b(func|let|var|if|else|guard|switch|case|default|return|struct|class|enum|protocol|extension|import|init|deinit|self|true|false|nil|throws|throw|try|do|catch|async|await|for|in|while|repeat|break|continue|where|public|private|internal|fileprivate|open|static|final|lazy|mutating|weak|unowned)\b/g;
+      return tokenizeGeneric(src, KW);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeJS(src) {
+    try {
+      const KW = /\b(function|const|let|var|if|else|for|while|do|return|switch|case|default|break|continue|new|this|class|extends|super|import|export|from|as|of|in|typeof|instanceof|async|await|try|catch|finally|throw|true|false|null|undefined|void|delete)\b/g;
+      return tokenizeGeneric(src, KW);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizePython(src) {
+    try {
+      const KW = /\b(def|class|if|elif|else|for|while|return|import|from|as|in|not|and|or|is|lambda|try|except|finally|raise|with|pass|break|continue|yield|global|nonlocal|async|await|True|False|None|self)\b/g;
+      return tokenizeGeneric(src, KW, true);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeBash(src) {
+    try {
+      const KW = /\b(if|then|else|elif|fi|for|while|do|done|case|esac|function|return|in|exit|break|continue|local|export|unset|read|echo|printf|cd|pwd|ls)\b/g;
+      return tokenizeGeneric(src, KW, false, true);
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  // Generic tokenizer for Swift/JS/Python/Bash.
+  // pyTriple: enable triple-quoted strings; bashMode: no escape handling in strings.
+  function tokenizeGeneric(src, kwRe, pyTriple, bashMode) {
+    const toks = [];
+    let i = 0;
+    const n = src.length;
+    function flush(start) {
+      if (start < i) toks.push({type:'plain', text: src.slice(start, i)});
+    }
+    let plain = 0;
+    while (i < n) {
+      // Block comment /* ... */
+      if (src[i]==='/' && src[i+1]==='*') {
+        flush(plain); const s=i; i+=2;
+        while (i<n && !(src[i-1]==='*' && src[i]==='/')) i++;
+        i++; toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Line comment // ...
+      if (src[i]==='/' && src[i+1]==='/') {
+        flush(plain); const s=i; i+=2;
+        while (i<n && src[i]!=='\n') i++;
+        toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Hash comment (Python/Bash)
+      if ((pyTriple||bashMode) && src[i]==='#') {
+        flush(plain); const s=i; i++;
+        while (i<n && src[i]!=='\n') i++;
+        toks.push({type:'comment', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Triple-quoted strings (Python)
+      if (pyTriple && (src.slice(i,i+3)==='"""' || src.slice(i,i+3)==="'''")) {
+        flush(plain); const q=src.slice(i,i+3); const s=i; i+=3;
+        while (i<n && src.slice(i,i+3)!==q) i++;
+        i+=3; toks.push({type:'string', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Regular strings
+      if (src[i]==='"' || src[i]==="'" || src[i]==='`') {
+        flush(plain); const q=src[i]; const s=i; i++;
+        while (i<n && src[i]!==q && src[i]!=='\n') {
+          if (!bashMode && src[i]==='\\') i++;
+          i++;
+        }
+        if (i<n && src[i]===q) i++;
+        toks.push({type:'string', text:src.slice(s,i)}); plain=i; continue;
+      }
+      // Numbers
+      if (src[i]>='0' && src[i]<='9') {
+        flush(plain); const s=i;
+        while (i<n && (src[i]>='0'&&src[i]<='9'||src[i]==='.'||src[i]==='e'||src[i]==='E'||src[i]==='-'&&(src[i-1]==='e'||src[i-1]==='E'))) i++;
+        toks.push({type:'number', text:src.slice(s,i)}); plain=i; continue;
+      }
+      i++;
+    }
+    flush(plain);
+    // Second pass: tag keywords inside plain tokens
+    const out = [];
+    for (const t of toks) {
+      if (t.type !== 'plain') { out.push(t); continue; }
+      kwRe.lastIndex = 0;
+      let last = 0; let m;
+      while ((m = kwRe.exec(t.text)) !== null) {
+        if (m.index > last) out.push({type:'plain', text:t.text.slice(last, m.index)});
+        out.push({type:'keyword', text:m[0]});
+        last = m.index + m[0].length;
+      }
+      if (last < t.text.length) out.push({type:'plain', text:t.text.slice(last)});
+    }
+    return out;
+  }
+
+  function tokenizeHTML(src) {
+    try {
+      const toks = [];
+      let i = 0; const n = src.length;
+      function push(type, text) { if (text) toks.push({type, text}); }
+      while (i < n) {
+        // Comment
+        if (src.slice(i,i+4)==='<!--') {
+          const s=i; i+=4;
+          while (i<n && src.slice(i,i+3)!=='-->') i++;
+          i+=3; push('comment', src.slice(s,i)); continue;
+        }
+        if (src[i]==='<') {
+          push('punct','<'); i++;
+          const close = src[i]==='/' ? (push('punct','/'), i++, true) : false;
+          // Tag name
+          const ts=i; while (i<n && /[a-zA-Z0-9:_-]/.test(src[i])) i++;
+          push('tag', src.slice(ts,i));
+          // Attributes until > or />
+          while (i<n && src[i]!=='>') {
+            if (src.slice(i,i+2)==='/>') { push('punct','/>'); i+=2; break; }
+            // Whitespace
+            const ws=i; while (i<n && /\s/.test(src[i]) && src[i]!=='>') i++;
+            if (i>ws) push('plain', src.slice(ws,i));
+            if (src[i]==='>' || src[i]===undefined) break;
+            // Attr name
+            const as=i; while (i<n && !/[\s=>/]/.test(src[i])) i++;
+            push('attr', src.slice(as,i));
+            // =value
+            if (src[i]==='=') { push('punct','='); i++;
+              if (src[i]==='"'||src[i]==="'") {
+                const q=src[i]; const vs=i; i++;
+                while (i<n && src[i]!==q) i++;
+                i++; push('string', src.slice(vs,i));
+              } else {
+                const vs=i; while (i<n && !/[\s>]/.test(src[i])) i++;
+                push('attr', src.slice(vs,i));
+              }
+            }
+          }
+          if (i<n && src[i]==='>') { push('punct','>'); i++; }
+          continue;
+        }
+        // Plain text
+        const s=i; while (i<n && src[i]!=='<') i++;
+        push('plain', src.slice(s,i));
+      }
+      return toks;
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  function tokenizeCSS(src) {
+    try {
+      const toks = [];
+      let i = 0; const n = src.length;
+      // state: 'sel' | 'prop' | 'val' | 'nested-prop' | 'nested-val'
+      let state = 'sel'; let depth = 0;
+      function push(type, text) { if (text) toks.push({type, text}); }
+      function readString(q) {
+        const s=i; i++;
+        while (i<n && src[i]!==q) i++;
+        if (i<n) i++;
+        return src.slice(s,i);
+      }
+      let mark = 0;
+      function flush(to) { if (mark<to) push('plain', src.slice(mark,to)); mark=to; }
+      while (i < n) {
+        // Block comment
+        if (src.slice(i,i+2)==='/*') {
+          flush(i); const s=i; i+=2;
+          while (i<n && src.slice(i,i+2)!=='*/') i++;
+          i+=2; push('comment', src.slice(s,i)); mark=i; continue;
+        }
+        // Strings
+        if (src[i]==='"'||src[i]==="'") {
+          flush(i); push('string', readString(src[i])); mark=i; continue;
+        }
+        if (state==='sel' || state==='nested-sel') {
+          if (src[i]==='{') {
+            const sel=src.slice(mark,i).trim();
+            push('tag', sel); push('plain', ' ');
+            push('punct','{'); i++; mark=i;
+            depth++; state = depth===1 ? 'prop' : 'nested-prop';
+            continue;
+          }
+        } else if (state==='prop' || state==='nested-prop') {
+          if (src[i]==='}') {
+            flush(i); push('punct','}'); i++; mark=i;
+            depth--; state = depth===0 ? 'sel' : (depth===1 ? 'prop' : 'nested-prop');
+            continue;
+          }
+          if (src[i]==='{') {
+            // nested selector (e.g. @media)
+            const sel=src.slice(mark,i).trim();
+            if (sel) push('tag', sel);
+            push('plain',' '); push('punct','{'); i++; mark=i;
+            depth++; state='nested-prop'; continue;
+          }
+          if (src[i]===':') {
+            const prop=src.slice(mark,i).trim();
+            if (prop) push('prop', prop);
+            push('punct',':'); i++; mark=i;
+            state = state==='prop' ? 'val' : 'nested-val'; continue;
+          }
+        } else { // val / nested-val
+          if (src[i]===';') {
+            flush(i); push('punct',';'); i++; mark=i;
+            state = state==='val' ? 'prop' : 'nested-prop'; continue;
+          }
+          if (src[i]==='}') {
+            flush(i); push('punct','}'); i++; mark=i;
+            depth--;
+            state = depth===0 ? 'sel' : (depth===1 ? 'prop' : 'nested-prop');
+            continue;
+          }
+        }
+        i++;
+      }
+      flush(n);
+      return toks;
+    } catch(e) { return [{type:'plain',text:src}]; }
+  }
+
+  const tokenizers = {
+    swift: tokenizeSwift,
+    javascript: tokenizeJS, js: tokenizeJS,
+    python: tokenizePython, py: tokenizePython,
+    bash: tokenizeBash, sh: tokenizeBash,
+    html: tokenizeHTML,
+    css: tokenizeCSS,
+  };
+
+  // Build a <pre> for a recognized fence, preserving textContent equality.
+  function renderFence(opener, content, closer, lang, parent) {
+    const fn = tokenizers[lang];
+    if (!fn) { parent.appendChild(document.createTextNode(opener + content + closer)); return; }
+    const tokens = fn(content);
+    const pre = document.createElement('pre');
+    pre.className = 'hl hl-' + lang;
+    pre.appendChild(document.createTextNode(opener));
+    for (const tok of tokens) {
+      if (tok.type === 'plain') {
+        pre.appendChild(document.createTextNode(tok.text));
+      } else {
+        const span = document.createElement('span');
+        span.className = 'tok-' + tok.type;
+        span.textContent = tok.text;
+        pre.appendChild(span);
+      }
+    }
+    pre.appendChild(document.createTextNode(closer));
+    parent.appendChild(pre);
+  }
+
+  // Walk text, splitting on triple-backtick fences, apply syntax highlighting.
+  // Falls back to a plain Text node for unrecognized/no-lang fences.
+  // INVARIANT: $render.textContent === text after this call.
+  function setRenderTextWithSyntax(text) {
+    while ($render.firstChild) $render.removeChild($render.firstChild);
+    // Fast path: no fences present.
+    if (text.indexOf('```') === -1) {
+      $render.appendChild(document.createTextNode(text));
+      return;
+    }
+    const lines = text.split('\n');
+    let i = 0; let plainStart = 0; let pos = 0;
+    // pos tracks char offset into `text` (including newlines)
+    const lineOffsets = [];
+    let off = 0;
+    for (const l of lines) { lineOffsets.push(off); off += l.length + 1; }
+
+    while (i < lines.length) {
+      const m = lines[i].match(/^```([a-z0-9+#-]*)\s*$/);
+      if (m !== null) {
+        // Emit plain text before this fence
+        const fenceStartChar = lineOffsets[i];
+        if (fenceStartChar > plainStart) {
+          $render.appendChild(document.createTextNode(text.slice(plainStart, fenceStartChar)));
+        }
+        const lang = m[1] || '';
+        const openerLine = lines[i];
+        const openerChar = lineOffsets[i];
+        // Find closing ```
+        let j = i + 1;
+        while (j < lines.length && lines[j].match(/^```\s*$/) === null) j++;
+        if (j >= lines.length) {
+          // No closing fence — emit rest as plain and stop
+          $render.appendChild(document.createTextNode(text.slice(fenceStartChar)));
+          return;
+        }
+        const closerLine = lines[j];
+        const closerCharStart = lineOffsets[j];
+        const closerCharEnd = lineOffsets[j] + closerLine.length + (j < lines.length - 1 ? 1 : 0);
+        // opener includes its trailing newline; content is lines i+1..j-1; closer is the closing line
+        const opener = text.slice(openerChar, lineOffsets[i+1] !== undefined ? lineOffsets[i+1] : openerChar + openerLine.length);
+        // content: from after opener line to just before closing line
+        const contentStart = lineOffsets[i] + openerLine.length + 1;
+        const contentEnd   = lineOffsets[j];
+        const content = text.slice(contentStart, contentEnd);
+        // closer: the closing ``` line, including trailing newline if present
+        const closer = text.slice(lineOffsets[j], closerCharEnd);
+
+        if (lang && tokenizers[lang]) {
+          renderFence(opener, content, closer, lang, $render);
+        } else {
+          $render.appendChild(document.createTextNode(opener + content + closer));
+        }
+        plainStart = closerCharEnd;
+        i = j + 1;
+      } else {
+        i++;
+      }
+    }
+    // Remaining plain text after last fence
+    if (plainStart < text.length) {
+      $render.appendChild(document.createTextNode(text.slice(plainStart)));
+    }
+  }
+
+  // ── End Syntax highlighting ─────────────────────────────────────────────────
+
+  // Replace render layer with syntax-highlighted nodes (or a single Text node
+  // when there are no recognized fences — same fast path as v2).
   function setRenderText(text) {
-    $render.textContent = text;
+    setRenderTextWithSyntax(text);
   }
 
   // Lay out: [text before cursor] + [fresh span] + [text after cursor].
