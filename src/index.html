@@ -100,9 +100,63 @@
     z-index: 0;
   }
   .hint.gone { opacity: 0; }
+
+  /* Find bar */
+  #findbar {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 40px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--ghost);
+    z-index: 10;
+    align-items: center;
+    padding: 0 max(96px, 12vw);
+    gap: 8px;
+  }
+  #findbar.visible { display: flex; }
+
+  body.has-find .editor { padding-top: 104px; }
+  body.has-find .input-layer { top: 104px; }
+  body.has-find .hint { top: 104px; }
+
+  #findinput {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1;
+    caret-color: var(--caret);
+  }
+  #findstatus {
+    font-size: 12px;
+    color: var(--ghost);
+    white-space: nowrap;
+  }
+  #findclose {
+    background: none;
+    border: none;
+    color: var(--ghost);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  #findclose:hover { color: var(--ink); }
+
+  mark { background: rgba(255, 235, 99, 0.30); color: var(--ink); padding: 0; }
+  mark.mark-current { background: rgba(255, 235, 99, 0.55); }
 </style>
 </head>
 <body>
+  <div id="findbar">
+    <input type="text" id="findinput" placeholder="Find" autocomplete="off" spellcheck="false">
+    <span id="findstatus"></span>
+    <button id="findclose">×</button>
+  </div>
   <div class="editor" id="editor">
     <div class="hint textbox" id="hint">Start writing…</div>
     <div class="render-layer textbox" id="render"></div>
@@ -175,6 +229,7 @@
 
   $input.addEventListener('input', (e) => {
     const want = $input.value;
+    if (find.active) { find.close(); }
     // Animate single-character insertText only. Paste, autocomplete, delete,
     // and any composition event take the snap path.
     if (e.inputType === 'insertText' && e.data && e.data.length === 1) {
@@ -211,6 +266,138 @@
     getContent() { return $input.value; },
     markClean() { clean = true; }
   };
+
+  // ── Find-in-page ────────────────────────────────────────────────────────────
+  const $findbar    = document.getElementById('findbar');
+  const $findinput  = document.getElementById('findinput');
+  const $findstatus = document.getElementById('findstatus');
+  const $findclose  = document.getElementById('findclose');
+
+  const find = {
+    active: false,
+    matches: [],
+    current: -1,
+    query: '',
+
+    open() {
+      find.active = true;
+      document.body.classList.add('has-find');
+      $findbar.classList.add('visible');
+      const sel = $input.value.slice($input.selectionStart, $input.selectionEnd);
+      if (sel) $findinput.value = sel;
+      $findinput.focus();
+      $findinput.select();
+      find.setQuery($findinput.value);
+    },
+
+    close() {
+      find.active = false;
+      document.body.classList.remove('has-find');
+      $findbar.classList.remove('visible');
+      if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
+      setRenderText($input.value);
+      resizeTextarea();
+      $input.focus();
+    },
+
+    setQuery(q) {
+      find.query = q;
+      find.matches = [];
+      if (q.length > 0) {
+        const text = $input.value;
+        const lower = text.toLowerCase();
+        const lq = q.toLowerCase();
+        let i = 0;
+        while (i <= lower.length - lq.length) {
+          const idx = lower.indexOf(lq, i);
+          if (idx === -1) break;
+          find.matches.push({ start: idx, end: idx + lq.length });
+          i = idx + lq.length;
+        }
+      }
+      find.current = find.matches.length > 0 ? 0 : -1;
+      find.updateStatus();
+      find.highlight();
+    },
+
+    next() {
+      if (find.matches.length === 0) return;
+      find.current = (find.current + 1) % find.matches.length;
+      find.highlight();
+    },
+
+    prev() {
+      if (find.matches.length === 0) return;
+      find.current = (find.current - 1 + find.matches.length) % find.matches.length;
+      find.highlight();
+    },
+
+    updateStatus() {
+      if (find.query === '') {
+        $findstatus.textContent = '';
+      } else if (find.matches.length === 0) {
+        $findstatus.textContent = 'no matches';
+      } else {
+        $findstatus.textContent = (find.current + 1) + ' of ' + find.matches.length;
+      }
+    },
+
+    highlight() {
+      while ($render.firstChild) $render.removeChild($render.firstChild);
+      const text = $input.value;
+      if (find.matches.length === 0) {
+        $render.appendChild(document.createTextNode(text));
+        find.updateStatus();
+        return;
+      }
+      let pos = 0;
+      for (let i = 0; i < find.matches.length; i++) {
+        const m = find.matches[i];
+        if (m.start > pos) {
+          $render.appendChild(document.createTextNode(text.slice(pos, m.start)));
+        }
+        const mark = document.createElement('mark');
+        if (i === find.current) mark.classList.add('mark-current');
+        mark.textContent = text.slice(m.start, m.end);
+        $render.appendChild(mark);
+        pos = m.end;
+      }
+      if (pos < text.length) {
+        $render.appendChild(document.createTextNode(text.slice(pos)));
+      }
+      find.updateStatus();
+      if (find.current >= 0) {
+        const currentMark = $render.querySelector('mark.mark-current');
+        if (currentMark) currentMark.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
+    }
+  };
+
+  window.find_open = () => find.open();
+
+  $findinput.addEventListener('input', () => find.setQuery($findinput.value));
+  $findclose.addEventListener('click', () => find.close());
+
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey && e.key === 'f') {
+      e.preventDefault();
+      find.open();
+      return;
+    }
+    if (find.active) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        find.close();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.shiftKey) find.prev(); else find.next();
+        return;
+      }
+    }
+  });
+  // ── End Find-in-page ────────────────────────────────────────────────────────
 
   if (native && native.ready) native.ready.postMessage(true);
 

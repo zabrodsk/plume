@@ -226,6 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         editMenu.addItem(NSMenuItem(title: "Select All",
                                     action: #selector(NSText.selectAll(_:)),
                                     keyEquivalent: "a"))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Find\u{2026}", action: #selector(performFind), keyEquivalent: "f"))
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -256,6 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     var appName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Plume"
+    }
+
+    @objc func performFind() {
+        webView.evaluateJavaScript("window.find_open && window.find_open()")
     }
 
     @objc func newFile() {
