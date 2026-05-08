@@ -24,9 +24,13 @@ APP_PATH="${SRC_DIR}/${APP_NAME}.app"
 TEAM_ID="GT2SGCCN5R"
 SIGN_IDENTITY="Developer ID Application: Dusan Zabrodsky (${TEAM_ID})"
 NOTARY_PROFILE="${NOTARY_PROFILE:-mach-notary}"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${SRC_DIR}/Info.plist")"
 
 DMG_PATH="${DIST_DIR}/${APP_NAME}.dmg"
 ZIP_PATH="${DIST_DIR}/${APP_NAME}.zip"
+SPARKLE_VERSION="2.9.1"
+SPARKLE_CACHE="${PROJECT_DIR}/.build/sparkle-${SPARKLE_VERSION}"
+SPARKLE_APPCAST_DIR="${DIST_DIR}/sparkle-appcast"
 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 fail() { printf "\033[31mERROR:\033[0m %s\n" "$1" >&2; exit 1; }
@@ -47,6 +51,10 @@ bold "==> Build (universal binary, ad-hoc, via src/build.sh)"
 [ -d "${APP_PATH}" ] || fail "Expected ${APP_PATH}, not built"
 
 bold "==> Re-sign with Developer ID + hardened runtime"
+if [ -d "${APP_PATH}/Contents/Frameworks/Sparkle.framework" ]; then
+  codesign --force --deep --options=runtime --timestamp \
+    --sign "${SIGN_IDENTITY}" "${APP_PATH}/Contents/Frameworks/Sparkle.framework"
+fi
 codesign --force --options=runtime --timestamp \
   --sign "${SIGN_IDENTITY}" "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
@@ -77,7 +85,25 @@ spctl --assess --type open --context context:primary-signature -v "${DMG_PATH}"
 bold "==> Build .zip (back-compat for existing README link)"
 (cd "${SRC_DIR}" && zip -r -q "${ZIP_PATH}" "${APP_NAME}.app")
 
+bold "==> Generate Sparkle appcast"
+rm -rf "${SPARKLE_APPCAST_DIR}"
+mkdir -p "${SPARKLE_APPCAST_DIR}"
+cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
+cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<'NOTES'
+## Plume 2.7.0
+
+- Adds one-click app updates through Sparkle.
+- Keeps the SSH browser change from 2.6.0: hidden folders are visible, hidden files remain hidden.
+NOTES
+"${SPARKLE_CACHE}/bin/generate_appcast" \
+  --download-url-prefix "https://github.com/zabrodsk/plume/releases/download/v${VERSION}/" \
+  --embed-release-notes \
+  --maximum-versions 0 \
+  "${SPARKLE_APPCAST_DIR}"
+cp "${SPARKLE_APPCAST_DIR}/appcast.xml" "${PROJECT_DIR}/appcast.xml"
+
 echo ""
 bold "✅ Released"
 printf "   DMG: %s (%s)\n" "${DMG_PATH}" "$(du -h "${DMG_PATH}" | cut -f1)"
 printf "   ZIP: %s (%s)\n" "${ZIP_PATH}" "$(du -h "${ZIP_PATH}" | cut -f1)"
+printf "   Appcast: %s\n" "${PROJECT_DIR}/appcast.xml"

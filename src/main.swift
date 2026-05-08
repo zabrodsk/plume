@@ -1,4 +1,5 @@
 import Cocoa
+import Sparkle
 import WebKit
 import UniformTypeIdentifiers
 
@@ -89,91 +90,6 @@ private extension NSButton {
     }
 }
 
-// MARK: - Update check
-
-enum UpdateCheck {
-    private static let endpoint = URL(string: "https://api.github.com/repos/zabrodsk/plume/releases/latest")!
-    private static let releasesPage = URL(string: "https://github.com/zabrodsk/plume/releases/latest")!
-
-    struct AvailableUpdate {
-        let latestTag: String
-        let url: URL
-    }
-
-    static var releasesURL: URL { releasesPage }
-
-    /// Run a check if all opt-out gates allow it.
-    /// - argvDisabled: pass true if the launch had --no-update-check.
-    /// - completion: invoked on the main queue; nil if no update or any gate failed.
-    static func runIfNeeded(argvDisabled: Bool, completion: @escaping (AvailableUpdate?) -> Void) {
-        // Gate 1: argv flag
-        if argvDisabled { completion(nil); return }
-
-        // Gate 2: explicit user pref. Default true.
-        let prefKey = "plume.updateCheckEnabled"
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: prefKey) != nil && defaults.bool(forKey: prefKey) == false {
-            completion(nil); return
-        }
-
-        // Gate 3: once per day debounce
-        let lastKey = "plume.lastUpdateCheckDate"
-        if let last = defaults.object(forKey: lastKey) as? Date,
-           Date().timeIntervalSince(last) < 24 * 3600 {
-            completion(nil); return
-        }
-
-        var req = URLRequest(url: endpoint)
-        req.timeoutInterval = 10
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("plume/\(currentVersion()) (macOS)", forHTTPHeaderField: "User-Agent")
-
-        URLSession.shared.dataTask(with: req) { data, response, error in
-            DispatchQueue.main.async {
-                guard error == nil,
-                      let http = response as? HTTPURLResponse, http.statusCode == 200,
-                      let data = data,
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let tag = obj["tag_name"] as? String else {
-                    completion(nil); return
-                }
-                defaults.set(Date(), forKey: lastKey)
-
-                if isNewer(remote: tag, local: currentVersion()) {
-                    completion(AvailableUpdate(latestTag: tag, url: releasesPage))
-                } else {
-                    completion(nil)
-                }
-            }
-        }.resume()
-    }
-
-    private static func currentVersion() -> String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
-    }
-
-    /// Compare versions like "v2.6" vs "2.5.0". Strips an optional leading 'v'.
-    /// Pads shorter component lists with zeros so "2.5" == "2.5.0".
-    static func isNewer(remote: String, local: String) -> Bool {
-        func parts(_ s: String) -> [Int] {
-            var stripped = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if stripped.first == "v" || stripped.first == "V" { stripped.removeFirst() }
-            // Stop at the first non-version-like character (e.g. "-beta")
-            let cut = stripped.firstIndex(where: { !($0.isNumber || $0 == ".") }) ?? stripped.endIndex
-            return String(stripped[..<cut]).split(separator: ".").compactMap { Int($0) }
-        }
-        let r = parts(remote); let l = parts(local)
-        let n = max(r.count, l.count)
-        for i in 0..<n {
-            let ri = i < r.count ? r[i] : 0
-            let li = i < l.count ? l[i] : 0
-            if ri > li { return true }
-            if ri < li { return false }
-        }
-        return false
-    }
-}
-
 // MARK: - App delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, NSWindowDelegate, NSMenuDelegate {
@@ -186,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var pendingRemoteToOpen: SSHPath?
     var jsReady: Bool = false
     var browseController: BrowseWindowController?
+    var updaterController: SPUStandardUpdaterController!
 
     private var currentReadTask: SSHTask?
     private var progressOverlay: ProgressOverlay?
@@ -229,21 +146,13 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 """
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
         setupMenu()
         setupWindow()
-        let argvDisabled = CommandLine.arguments.contains("--no-update-check")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            UpdateCheck.runIfNeeded(argvDisabled: argvDisabled) { available in
-                guard let self = self, let u = available else { return }
-                self.notifyJSAboutUpdate(tag: u.latestTag, url: u.url.absoluteString)
-            }
-        }
-    }
-
-    private func notifyJSAboutUpdate(tag: String, url: String) {
-        let escTag = encodeForJS(tag)
-        let escURL = encodeForJS(url)
-        webView.evaluateJavaScript("window.update_show && window.update_show(\(escTag), \(escURL))")
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
@@ -309,6 +218,13 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         appMenu.addItem(NSMenuItem(title: "About \(appName)",
                                    action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                                    keyEquivalent: ""))
+        let checkForUpdates = NSMenuItem(
+            title: "Check for Updates\u{2026}",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = updaterController
+        appMenu.addItem(checkForUpdates)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Hide \(appName)",
                                    action: #selector(NSApplication.hide(_:)),

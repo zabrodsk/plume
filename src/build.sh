@@ -8,6 +8,26 @@ APP="${APP_NAME}.app"
 CONTENTS="${APP}/Contents"
 MACOS="${CONTENTS}/MacOS"
 RES="${CONTENTS}/Resources"
+FRAMEWORKS="${CONTENTS}/Frameworks"
+SPARKLE_VERSION="2.9.1"
+SPARKLE_CACHE="../.build/sparkle-${SPARKLE_VERSION}"
+SPARKLE_FRAMEWORK="${SPARKLE_CACHE}/Sparkle.framework"
+
+ensure_sparkle() {
+    if [ -d "${SPARKLE_FRAMEWORK}" ]; then
+        return
+    fi
+
+    echo "→ fetching Sparkle ${SPARKLE_VERSION}..."
+    rm -rf "${SPARKLE_CACHE}"
+    mkdir -p "${SPARKLE_CACHE}"
+    local archive="${SPARKLE_CACHE}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+    curl -L "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+        -o "${archive}"
+    tar -xf "${archive}" -C "${SPARKLE_CACHE}"
+}
+
+ensure_sparkle
 
 # Generate icon
 echo "→ rendering icon..."
@@ -17,12 +37,13 @@ rm -rf AppIcon.iconset
 
 # Compile
 rm -rf "${APP}"
-mkdir -p "${MACOS}" "${RES}"
+mkdir -p "${MACOS}" "${RES}" "${FRAMEWORKS}"
 
 echo "→ compiling Swift (universal arm64 + x86_64)..."
 SWIFT_SOURCES=(main.swift sshio.swift)
-swiftc -O -target arm64-apple-macos12 "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-arm64"
-swiftc -O -target x86_64-apple-macos12 "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-x86_64" 2>/dev/null || {
+SWIFT_FLAGS=(-O -F "${SPARKLE_CACHE}" -framework Sparkle -Xlinker -rpath -Xlinker "@executable_path/../Frameworks")
+swiftc -target arm64-apple-macos12 "${SWIFT_FLAGS[@]}" "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-arm64"
+swiftc -target x86_64-apple-macos12 "${SWIFT_FLAGS[@]}" "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-x86_64" 2>/dev/null || {
     echo "  (x86_64 unavailable — Apple Silicon only)"
     mv "${MACOS}/${BIN_NAME}-arm64" "${MACOS}/${BIN_NAME}"
     rm -f "${MACOS}/${BIN_NAME}-x86_64"
@@ -41,6 +62,7 @@ echo "→ bundling resources..."
 cp Info.plist "${CONTENTS}/Info.plist"
 cp index.html "${RES}/index.html"
 cp AppIcon.icns "${RES}/AppIcon.icns"
+ditto "${SPARKLE_FRAMEWORK}" "${FRAMEWORKS}/Sparkle.framework"
 rm -f AppIcon.icns
 
 # Ad-hoc sign so Gatekeeper doesn't quarantine it locally.

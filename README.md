@@ -37,16 +37,16 @@
 
 | | | |
 |:---:|:---:|:---:|
-| **90 ms** | **0** | **2 files** |
-| Letter entrance | Runtime dependencies | Source surface |
-| **<400 KB** | **12+** | **100 %** |
+| **90 ms** | **Sparkle** | **3 files** |
+| Letter entrance | App updates | Source surface |
+| **<4 MB** | **12+** | **100 %** |
 | Universal binary | macOS supported | Open source · MIT |
 
 <br>
 
 ## Install
 
-**Pre-built** &nbsp;→&nbsp; download [`Plume.dmg`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg), drag `Plume.app` to `/Applications`. Notarized — opens with one click, no Gatekeeper warning. (Or grab [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) — same app, right-click → *Open* on first launch.)
+**Pre-built** &nbsp;→&nbsp; download [`Plume.dmg`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg), drag `Plume.app` to `/Applications`. Notarized — opens with one click, no Gatekeeper warning. Future updates install through `Plume → Check for Updates…`. (Or grab [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) — same app, right-click → *Open* on first launch.)
 
 **From source** &nbsp;→&nbsp;
 
@@ -67,13 +67,13 @@ Requires macOS 12+ and the Swift toolchain (`xcode-select --install`).
 
 ```
 src/
-  main.swift     Cocoa shell — window, menu, file I/O (incl. SSH), JS bridge
+  main.swift     Cocoa shell — window, menu, file I/O (incl. SSH), updater, JS bridge
   index.html     Editor (dark mode), runs inside WKWebView
   icon.swift     Generates AppIcon.icns
   Info.plist     Bundle metadata
   build.sh       swiftc → lipo → iconutil → bundle → ad-hoc sign
 dist/
-  release.sh     Developer ID re-sign → DMG → notarize → staple
+  release.sh     Developer ID re-sign → DMG → notarize → staple → appcast
 docs/
   index.html     Marketing landing page (the live demo)
   editor.html    Editor, web-embedded variant
@@ -95,6 +95,7 @@ Behind the scenes:
 - **Cocoa + WKWebView** — the chrome is native (NSWindow, NSMenu, file panels); the editor is HTML/CSS/JS inside a web view. Best of both: native menus and shortcuts, web-grade animation precision.
 - **Stable-text model** — incremental input diffing means each keystroke only mutates one DOM node. Paste 10&nbsp;KB and the render layer is still a single text node 140&nbsp;ms later.
 - **Edit anywhere** — `File → Open via SSH…` (⌥⌘O) opens remote files over SSH using your existing keys and `~/.ssh/config`. Atomic writes, zero new auth surface, zero bundled dependencies.
+- **Self-updating** — Sparkle checks the signed appcast and installs future releases from inside Plume.
 - **Universal binary** — one `Plume.app`, runs natively on every Mac sold since 2012 (Apple Silicon and Intel).
 
 <br>
