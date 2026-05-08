@@ -191,6 +191,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var progressOverlay: ProgressOverlay?
     private var escMonitor: Any?
 
+    // Version-keyed so future releases can independently decide whether to show a new welcome.
+    private static let firstLaunchKey = "plume.firstLaunchSeen.2.5.0"
+
+    private static let welcomeDocument = """
+# Welcome to Plume.
+
+Plume is a markdown editor for the satisfaction of typing. Every
+letter *blooms*. **Nothing else does.**
+
+## Four keys that matter
+
+- **⌘O** — open a local file
+- **⌥⌘O** — open a file on a remote server via SSH
+- **⌘F** — find in this page
+- **⌘?** — every other shortcut
+
+## A taste of what renders
+
+Inline code looks like `let x = 42`. Fenced code with a language
+tag gets colored:
+
+```swift
+func bloom(_ letter: Character) -> Animation {
+    .opacity(from: 0.4, to: 1.0, duration: .ms(90))
+}
+```
+
+A link points [home](https://github.com/zabrodsk/plume).
+
+## The page is yours.
+
+Delete this. Type something. Save with `⌘S`. That's all there is.
+
+> *Less app. More page.*
+
+"""
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
         setupWindow()
@@ -772,6 +809,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             } else if let remote = pendingRemoteToOpen {
                 pendingRemoteToOpen = nil
                 loadRemote(remote)
+            } else {
+                showWelcomeIfFirstLaunch()
             }
         case "openURL":
             if let s = message.body as? String, let url = URL(string: s) {
@@ -780,6 +819,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         default:
             break
         }
+    }
+
+    private func showWelcomeIfFirstLaunch() {
+        if UserDefaults.standard.bool(forKey: AppDelegate.firstLaunchKey) { return }
+        UserDefaults.standard.set(true, forKey: AppDelegate.firstLaunchKey)
+        // currentFile stays nil — saving will prompt via Save As.
+        // isDirty = true so ⌘W triggers the unsaved-changes prompt.
+        sendContentToEditor(AppDelegate.welcomeDocument, displayPath: nil)
+        isDirty = true
+        updateTitle()
     }
 
     private func sendContentToEditor(_ content: String, displayPath: String?) {
