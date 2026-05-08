@@ -733,6 +733,84 @@ a { color: inherit; text-decoration: none; }
 .footer a:hover { color: var(--accent); }
 .footer-links { display: flex; gap: 24px; }
 
+/* ── What's new (v2.5) ─────────────────────────────────────────────────── */
+.whats-new {
+  padding-top: clamp(120px, 18vh, 220px);
+  padding-bottom: clamp(80px, 12vh, 140px);
+  text-align: center;
+}
+.whats-new .head { margin-bottom: clamp(48px, 7vh, 80px); }
+.whats-new h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+}
+.whats-new .sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.whats-new-grid {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: clamp(20px, 3vw, 32px);
+  text-align: left;
+}
+.whats-new-card {
+  padding: clamp(24px, 3vh, 32px) clamp(20px, 3vw, 28px);
+  background: linear-gradient(180deg, #1f1c18, #171513);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.whats-new-card .kbd {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-deep);
+  color: var(--cream);
+  white-space: nowrap;
+}
+.whats-new-card h3 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(20px, 2.4vw, 26px);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0;
+}
+.whats-new-card p {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--cream);
+  margin: 0;
+}
+.whats-new-card code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg-deep);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+}
+
 /* ── Anywhere (SSH) ────────────────────────────────────────────────────── */
 .anywhere { padding-top: clamp(120px, 18vh, 220px); padding-bottom: clamp(120px, 18vh, 220px); }
 .anywhere .head { text-align: center; margin-bottom: clamp(40px, 6vh, 64px); }
@@ -933,13 +1011,49 @@ a { color: inherit; text-decoration: none; }
     Local folder, remote server, same keystroke. Plume reads your existing
     <code>~/.ssh/config</code> &mdash; your keys, your hosts, no new auth surface.
   </p>
+  <p class="anywhere-copy reveal" style="margin-top: clamp(20px, 3vh, 32px); font-size: clamp(15px, 1.6vw, 18px); color: var(--ghost);">
+    <span style="color: var(--cream);">v2.5</span> &middot; pick a host and Plume browses the directory. Click a <code>.md</code>, edit, save back over SSH.
+  </p>
+</section>
+
+<div class="rule" aria-hidden="true"></div>
+
+<!-- ───────────── What's new in v2.5 ───────────── -->
+<section class="section whats-new" id="whats-new">
+  <div class="head">
+    <div class="eyebrow reveal"><span class="accent">05 ·</span> what's new in v2.5</div>
+    <h2 class="reveal">A deeper page.</h2>
+    <p class="sub reveal">same brand &middot; less app &middot; more page</p>
+  </div>
+  <div class="whats-new-grid">
+    <div class="whats-new-card reveal" style="--delay: 0ms">
+      <span class="kbd">⌥⌘O</span>
+      <h3>Browse remote files</h3>
+      <p>Pick a host, see what's there, click to open. Read your <code>~/.ssh/config</code>; <code>ControlMaster</code> sockets make subsequent saves feel local. <code>Esc</code> cancels a hung read.</p>
+    </div>
+    <div class="whats-new-card reveal" style="--delay: 80ms">
+      <span class="kbd">⌘F</span>
+      <h3>Find in page</h3>
+      <p>A search bar drops in from the top. <code>↵</code> next, <code>⇧↵</code> previous, <code>Esc</code> dismisses. Fenced code blocks color in six languages — <code>swift</code>, <code>js</code>, <code>py</code>, <code>sh</code>, <code>html</code>, <code>css</code>.</p>
+    </div>
+    <div class="whats-new-card reveal" style="--delay: 160ms">
+      <span class="kbd">☀︎</span>
+      <h3>Light theme</h3>
+      <p>Plume now follows your system appearance. Cream-warm dark stays the default; cream-white light arrives if your Mac is set that way. No menu toggle, no preference — system-following only.</p>
+    </div>
+    <div class="whats-new-card reveal" style="--delay: 240ms">
+      <span class="kbd">⌘?</span>
+      <h3>Onboarding by way of a page</h3>
+      <p>First launch opens a single document that <em>is</em> the lesson. <code>⌘?</code> shows every shortcut on one screen. No wizard, no tour, no "skip". Editing or deleting is the natural exit.</p>
+    </div>
+  </div>
 </section>
 
 <div class="rule" aria-hidden="true"></div>
 
 <!-- ───────────── Manifesto ───────────── -->
 <section class="section manifesto" id="manifesto">
-  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">05 ·</span> the manifesto</div>
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">06 ·</span> the manifesto</div>
 
   <p class="quote reveal-blur" data-num="i">
     Writing should not feel like <span class="accent">fighting</span> your tools.
@@ -956,7 +1070,7 @@ a { color: inherit; text-decoration: none; }
 
 <!-- ───────────── Stats ───────────── -->
 <section class="section stats" id="stats">
-  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">06 ·</span>&nbsp;the numbers</div>
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">07 ·</span>&nbsp;the numbers</div>
   <div class="stats-grid">
     <div class="stat reveal" style="--delay: 0ms">
       <div class="num"><span data-counter="90">0</span><span class="unit">ms</span></div>
@@ -964,14 +1078,14 @@ a { color: inherit; text-decoration: none; }
       <div class="desc">Keystroke to fully-rendered character. Below the threshold of perceived lag.</div>
     </div>
     <div class="stat reveal" style="--delay: 80ms">
-      <div class="num"><span data-counter="380">0</span><span class="unit">KB</span></div>
+      <div class="num"><span data-counter="710">0</span><span class="unit">KB</span></div>
       <div class="label">Binary size</div>
-      <div class="desc">Universal Mac binary, with SSH support baked in. The Slack icon still weighs more.</div>
+      <div class="desc">Universal Mac binary. Browse, find, syntax highlighting — all baked in. Still smaller than most browser extensions.</div>
     </div>
     <div class="stat reveal" style="--delay: 160ms">
-      <div class="num"><span data-counter="2">0</span><span class="unit">files</span></div>
+      <div class="num"><span data-counter="3">0</span><span class="unit">files</span></div>
       <div class="label">Source surface</div>
-      <div class="desc">One <code>main.swift</code>, one <code>index.html</code>. Read every line at lunch.</div>
+      <div class="desc"><code>main.swift</code>, <code>sshio.swift</code>, <code>index.html</code>. Read every line in an afternoon.</div>
     </div>
     <div class="stat reveal" style="--delay: 240ms">
       <div class="num"><span data-counter="0">0</span></div>
@@ -993,7 +1107,7 @@ a { color: inherit; text-decoration: none; }
 
 <!-- ───────────── Download ───────────── -->
 <section class="download" id="download">
-  <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">07 ·</span>&nbsp;take it home</div>
+  <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">08 ·</span>&nbsp;take it home</div>
   <h2 class="reveal">It's yours.</h2>
   <p class="lead reveal">A single drag into <span class="hl">/Applications</span>. That's the install.</p>
   <div class="cta-row reveal">
