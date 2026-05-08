@@ -407,8 +407,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             combo.completes = true
             combo.usesDataSource = false
             combo.addItems(withObjectValues: SSHConfig.hostAliases())
-            alert.accessoryView = combo
+
+            let key = "plume.sshDialogSeen"
+            let firstTime = !UserDefaults.standard.bool(forKey: key)
+
+            let hint: NSTextField? = firstTime ? {
+                let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
+                label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
+                label.textColor = NSColor.secondaryLabelColor
+                label.maximumNumberOfLines = 2
+                label.lineBreakMode = .byWordWrapping
+                return label
+            }() : nil
+
+            let accessoryView: NSView
+            if let hint = hint {
+                let stack = NSStackView(views: [combo, hint])
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 6
+                stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
+                accessoryView = stack
+            } else {
+                accessoryView = combo
+            }
+            alert.accessoryView = accessoryView
             alert.window.initialFirstResponder = combo
+
+            if firstTime {
+                UserDefaults.standard.set(true, forKey: key)
+            }
 
             alert.beginSheetModal(for: self.window) { response in
                 guard response == .alertFirstButtonReturn else { return }
@@ -759,9 +787,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         menu.removeAllItems()
         let urls = NSDocumentController.shared.recentDocumentURLs
         if urls.isEmpty {
-            let empty = NSMenuItem(title: "No Recent Files", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
+            let italic = NSFontManager.shared.convert(NSFont.menuFont(ofSize: 0), toHaveTrait: .italicFontMask)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: italic,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+            let row1 = NSMenuItem()
+            row1.attributedTitle = NSAttributedString(string: "no files yet", attributes: attrs)
+            row1.isEnabled = false
+            let row2 = NSMenuItem()
+            row2.attributedTitle = NSAttributedString(string: "⌘O local · ⌥⌘O remote", attributes: attrs)
+            row2.isEnabled = false
+            menu.addItem(row1)
+            menu.addItem(row2)
             return
         }
         for url in urls {
