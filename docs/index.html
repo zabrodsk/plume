@@ -720,6 +720,94 @@ a { color: inherit; text-decoration: none; }
 .footer a:hover { color: var(--accent); }
 .footer-links { display: flex; gap: 24px; }
 
+/* ── Anywhere (SSH) ────────────────────────────────────────────────────── */
+.anywhere { padding-top: clamp(120px, 18vh, 220px); padding-bottom: clamp(120px, 18vh, 220px); }
+.anywhere .head { text-align: center; margin-bottom: clamp(40px, 6vh, 64px); }
+.anywhere h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+}
+.anywhere .sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.path-card {
+  margin: 0 auto;
+  max-width: 720px;
+  padding: clamp(20px, 3vh, 28px) clamp(20px, 4vw, 32px);
+  background: linear-gradient(180deg, #1f1c18, #171513);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 24px);
+  font-family: var(--mono);
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.03);
+}
+.path-card .kbd {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-deep);
+  color: var(--cream);
+  white-space: nowrap;
+  box-shadow: inset 0 -2px 0 rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04);
+}
+.path-card .path {
+  font-size: clamp(13px, 1.5vw, 15px);
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.path-card .g     { color: var(--ghost); margin-right: 8px; }
+.path-card .user  { color: var(--cream); }
+.path-card .at,
+.path-card .colon { color: var(--accent); }
+.path-card .host  { color: var(--warm); }
+.path-card .dir,
+.path-card .slash { color: var(--cream); }
+.path-card .file  { color: var(--ink); }
+.anywhere-copy {
+  margin: clamp(32px, 5vh, 48px) auto 0;
+  max-width: 52ch;
+  text-align: center;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(17px, 2vw, 22px);
+  line-height: 1.55;
+  color: var(--cream);
+}
+.anywhere-copy code {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 0.78em;
+  color: var(--ink);
+  background: var(--bg-deep);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  letter-spacing: 0;
+}
+@media (max-width: 600px) {
+  .path-card { flex-direction: column; align-items: stretch; gap: 14px; }
+  .path-card .kbd { align-self: flex-start; }
+  .path-card .path { white-space: normal; word-break: break-all; }
+}
+
 /* ── Responsive tweaks ─────────────────────────────────────────────────── */
 @media (max-width: 700px) {
   .nav-links a:not(.cta) { display: none; }
@@ -817,9 +905,28 @@ a { color: inherit; text-decoration: none; }
   </div>
 </section>
 
+<!-- ───────────── Edit anywhere (SSH) ───────────── -->
+<section class="section anywhere" id="anywhere">
+  <div class="head">
+    <div class="eyebrow reveal"><span class="accent">04 ·</span> go anywhere</div>
+    <h2 class="reveal">Open files anywhere.</h2>
+    <p class="sub reveal">⌥⌘O &middot; type a path &middot; plume opens it</p>
+  </div>
+  <div class="path-card reveal">
+    <span class="kbd">⌥⌘O</span>
+    <span class="path"><span class="g">▸</span><span class="user">dusan</span><span class="at">@</span><span class="host">server</span><span class="colon">:</span><span class="dir">/var/www/notes</span><span class="slash">/</span><span class="file">today.md</span></span>
+  </div>
+  <p class="anywhere-copy reveal">
+    Local folder, remote server, same keystroke. Plume reads your existing
+    <code>~/.ssh/config</code> &mdash; your keys, your hosts, no new auth surface.
+  </p>
+</section>
+
+<div class="rule" aria-hidden="true"></div>
+
 <!-- ───────────── Manifesto ───────────── -->
 <section class="section manifesto" id="manifesto">
-  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">04 ·</span> the manifesto</div>
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">05 ·</span> the manifesto</div>
 
   <p class="quote reveal-blur" data-num="i">
     Writing should not feel like <span class="accent">fighting</span> your tools.
@@ -836,7 +943,7 @@ a { color: inherit; text-decoration: none; }
 
 <!-- ───────────── Stats ───────────── -->
 <section class="section stats" id="stats">
-  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">05 ·</span>&nbsp;the numbers</div>
+  <div class="eyebrow reveal" style="text-align: center;"><span class="accent">06 ·</span>&nbsp;the numbers</div>
   <div class="stats-grid">
     <div class="stat reveal" style="--delay: 0ms">
       <div class="num"><span data-counter="90">0</span><span class="unit">ms</span></div>
@@ -844,9 +951,9 @@ a { color: inherit; text-decoration: none; }
       <div class="desc">Keystroke to fully-rendered character. Below the threshold of perceived lag.</div>
     </div>
     <div class="stat reveal" style="--delay: 80ms">
-      <div class="num"><span data-counter="200">0</span><span class="unit">KB</span></div>
+      <div class="num"><span data-counter="380">0</span><span class="unit">KB</span></div>
       <div class="label">Binary size</div>
-      <div class="desc">Universal Mac binary. The Slack icon weighs more than the whole app.</div>
+      <div class="desc">Universal Mac binary, with SSH support baked in. The Slack icon still weighs more.</div>
     </div>
     <div class="stat reveal" style="--delay: 160ms">
       <div class="num"><span data-counter="2">0</span><span class="unit">files</span></div>
@@ -859,9 +966,9 @@ a { color: inherit; text-decoration: none; }
       <div class="desc">No Electron. No Node. No bundler. Just Apple frameworks.</div>
     </div>
     <div class="stat reveal" style="--delay: 320ms">
-      <div class="num"><span data-counter="12">0</span><span class="unit">+ macOS</span></div>
-      <div class="label">Reach</div>
-      <div class="desc">Runs on every Mac sold since 2012. Apple Silicon and Intel, one binary.</div>
+      <div class="num"><span data-counter="1">0</span><span class="unit">protocol</span></div>
+      <div class="label">SSH</div>
+      <div class="desc">The only network thing Plume does. Your keys, your <code>~/.ssh/config</code>, no new auth surface.</div>
     </div>
     <div class="stat reveal" style="--delay: 400ms">
       <div class="num"><span data-counter="100">0</span><span class="unit">% open</span></div>
@@ -873,7 +980,7 @@ a { color: inherit; text-decoration: none; }
 
 <!-- ───────────── Download ───────────── -->
 <section class="download" id="download">
-  <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">06 ·</span>&nbsp;take it home</div>
+  <div class="eyebrow reveal" style="display: inline-block;"><span class="accent">07 ·</span>&nbsp;take it home</div>
   <h2 class="reveal">It's yours.</h2>
   <p class="lead reveal">A single drag into <span class="hl">/Applications</span>. That's the install.</p>
   <div class="cta-row reveal">
@@ -936,6 +1043,7 @@ document.querySelectorAll('.reveal, .reveal-blur, .window').forEach(el => {
 const phrases = [
   'a place where letters bloom.',
   'one keystroke at a time.',
+  'local folder, remote server.',
   'just text. just feel.',
   'and the page is yours.'
 ];
