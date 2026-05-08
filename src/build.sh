@@ -20,8 +20,9 @@ rm -rf "${APP}"
 mkdir -p "${MACOS}" "${RES}"
 
 echo "→ compiling Swift (universal arm64 + x86_64)..."
-swiftc -O -target arm64-apple-macos12 main.swift -o "${MACOS}/${BIN_NAME}-arm64"
-swiftc -O -target x86_64-apple-macos12 main.swift -o "${MACOS}/${BIN_NAME}-x86_64" 2>/dev/null || {
+SWIFT_SOURCES=(main.swift sshio.swift)
+swiftc -O -target arm64-apple-macos12 "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-arm64"
+swiftc -O -target x86_64-apple-macos12 "${SWIFT_SOURCES[@]}" -o "${MACOS}/${BIN_NAME}-x86_64" 2>/dev/null || {
     echo "  (x86_64 unavailable — Apple Silicon only)"
     mv "${MACOS}/${BIN_NAME}-arm64" "${MACOS}/${BIN_NAME}"
     rm -f "${MACOS}/${BIN_NAME}-x86_64"
