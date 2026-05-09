@@ -1247,7 +1247,9 @@ if ($announceVideo) {
 }
 
 /* ── Hybrid full-page snap ─────────────────────────────────────────────── */
-/* Block-jump on short sections. Native scroll inside .promise (letter
+/* rAF-driven custom animation (known duration -> tight lock window).
+   Fresh getBoundingClientRect per call (no stale cache after layout shifts).
+   Block-jump on short sections; native scroll inside .promise (letter
    reveal needs scroll position) and .manifesto (multi-quote stack). */
 (function () {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -1256,54 +1258,75 @@ if ($announceVideo) {
   const FREE = ['.promise', '.manifesto'];
   const ALL  = [...SNAP, ...FREE];
 
-  const LOCK_MS = 800;
-  const EDGE = 16;
-  const TOUCH_THRESHOLD = 50;
+  const SCROLL_MS = 620;        // animation duration
+  const LOCK_BUFFER_MS = 80;    // small breath after animation ends
+  const EDGE = 24;              // px slop for free-section edge detection
+  const TOUCH_THRESHOLD = 60;   // px before a swipe counts as advance
+  const WHEEL_FLOOR = 8;        // ignore trackpad inertia tail noise
 
-  let sections = [];
+  let sectionEls = [];
   let lockUntil = 0;
+  let animId = null;
 
-  function rebuild() {
-    sections = ALL
+  function buildList() {
+    sectionEls = ALL
       .map(sel => {
         const el = document.querySelector(sel);
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return {
-          el,
-          top: r.top + window.scrollY,
-          bottom: r.bottom + window.scrollY,
-          snap: SNAP.includes(sel),
-        };
+        return el ? { el, snap: SNAP.includes(sel) } : null;
       })
-      .filter(Boolean)
-      .sort((a, b) => a.top - b.top);
+      .filter(Boolean);
+    sectionEls.sort((a, b) =>
+      (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1
+    );
   }
+
+  function topOf(el)    { return el.getBoundingClientRect().top    + window.scrollY; }
+  function bottomOf(el) { return el.getBoundingClientRect().bottom + window.scrollY; }
 
   function currentIndex() {
     const probe = window.scrollY + window.innerHeight * 0.4;
-    for (let i = sections.length - 1; i >= 0; i--) {
-      if (probe >= sections[i].top - 10) return i;
+    for (let i = sectionEls.length - 1; i >= 0; i--) {
+      if (probe >= topOf(sectionEls[i].el) - 10) return i;
     }
     return 0;
   }
 
+  // ease in/out cubic — symmetric, no overshoot
+  function ease(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+  function animateTo(target) {
+    if (animId) cancelAnimationFrame(animId);
+    const start = window.scrollY;
+    const distance = target - start;
+    if (Math.abs(distance) < 1) return;
+    const t0 = performance.now();
+    lockUntil = t0 + SCROLL_MS + LOCK_BUFFER_MS;
+
+    function step(now) {
+      const t = Math.min(1, (now - t0) / SCROLL_MS);
+      window.scrollTo(0, Math.round(start + distance * ease(t)));
+      animId = (t < 1) ? requestAnimationFrame(step) : null;
+    }
+    animId = requestAnimationFrame(step);
+  }
+
   function jumpTo(idx) {
-    if (idx < 0 || idx >= sections.length) return;
-    lockUntil = Date.now() + LOCK_MS;
-    window.scrollTo({ top: sections[idx].top, behavior: 'smooth' });
+    if (idx < 0 || idx >= sectionEls.length) return;
+    animateTo(topOf(sectionEls[idx].el));
   }
 
   function tryAdvance(direction, evt) {
-    if (Date.now() < lockUntil) { if (evt) evt.preventDefault(); return; }
+    if (performance.now() < lockUntil) { if (evt) evt.preventDefault(); return; }
     const idx = currentIndex();
-    const sec = sections[idx];
+    const sec = sectionEls[idx];
     if (!sec) return;
 
     if (!sec.snap) {
-      const atTop    = window.scrollY <= sec.top + EDGE;
-      const atBottom = window.scrollY + window.innerHeight >= sec.bottom - EDGE;
-      if (direction < 0 && atTop)    { if (evt) evt.preventDefault(); jumpTo(idx - 1); }
+      const top    = topOf(sec.el);
+      const bottom = bottomOf(sec.el);
+      const atTop    = window.scrollY <= top + EDGE;
+      const atBottom = window.scrollY + window.innerHeight >= bottom - EDGE;
+      if (direction < 0 && atTop)         { if (evt) evt.preventDefault(); jumpTo(idx - 1); }
       else if (direction > 0 && atBottom) { if (evt) evt.preventDefault(); jumpTo(idx + 1); }
       return;
     }
@@ -1312,33 +1335,43 @@ if ($announceVideo) {
     jumpTo(idx + direction);
   }
 
-  rebuild();
-  window.addEventListener('resize', rebuild);
-  window.addEventListener('load', rebuild);
+  function inIgnoreTarget(el) {
+    return !!(el && el.closest && el.closest('input, textarea, select, [contenteditable], iframe'));
+  }
+
+  buildList();
+  window.addEventListener('load', buildList);
+  window.addEventListener('resize', buildList);
 
   window.addEventListener('wheel', (e) => {
-    if (Math.abs(e.deltaY) < 4) return;
+    if (Math.abs(e.deltaY) < WHEEL_FLOOR) return;
+    if (inIgnoreTarget(e.target)) return;
     tryAdvance(e.deltaY > 0 ? 1 : -1, e);
   }, { passive: false });
 
   let touchStartY = null;
+  let touchTarget = null;
   window.addEventListener('touchstart', (e) => {
     touchStartY = e.touches[0].clientY;
+    touchTarget = e.target;
   }, { passive: true });
   window.addEventListener('touchend', (e) => {
     if (touchStartY == null) return;
     const delta = touchStartY - e.changedTouches[0].clientY;
+    const tgt = touchTarget;
     touchStartY = null;
+    touchTarget = null;
     if (Math.abs(delta) < TOUCH_THRESHOLD) return;
+    if (inIgnoreTarget(tgt)) return;
     tryAdvance(delta > 0 ? 1 : -1, null);
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.target.matches('input, textarea, [contenteditable], iframe')) return;
+    if (inIgnoreTarget(document.activeElement)) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') tryAdvance(1, e);
-    else if (e.key === 'ArrowUp' || e.key === 'PageUp') tryAdvance(-1, e);
+    else if (e.key === 'ArrowUp' || e.key === 'PageUp')                 tryAdvance(-1, e);
     else if (e.key === 'Home') { e.preventDefault(); jumpTo(0); }
-    else if (e.key === 'End')  { e.preventDefault(); jumpTo(sections.length - 1); }
+    else if (e.key === 'End')  { e.preventDefault(); jumpTo(sectionEls.length - 1); }
   });
 
   document.querySelectorAll('a[href^="#"]').forEach((a) => {
@@ -1347,7 +1380,7 @@ if ($announceVideo) {
       if (!id) return;
       const target = document.getElementById(id);
       if (!target) return;
-      const idx = sections.findIndex(s => s.el === target);
+      const idx = sectionEls.findIndex(s => s.el === target);
       if (idx < 0) return;
       e.preventDefault();
       jumpTo(idx);
