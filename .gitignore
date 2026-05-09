@@ -21,3 +21,8 @@ dist/sparkle-appcast/
 
 # Local development
 *.log
+
+# Remotion video project
+video/node_modules/
+video/out/
+video/.remotion/
