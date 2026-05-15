@@ -90,10 +90,9 @@ rm -rf "${SPARKLE_APPCAST_DIR}"
 mkdir -p "${SPARKLE_APPCAST_DIR}"
 cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
 cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<'NOTES'
-## Plume 2.7.0
+## Plume 2.7.1
 
-- Adds one-click app updates through Sparkle.
-- Keeps the SSH browser change from 2.6.0: hidden folders are visible, hidden files remain hidden.
+- Fixes find bar (⌘F) overlapping the window title bar.
 NOTES
 "${SPARKLE_CACHE}/bin/generate_appcast" \
   --download-url-prefix "https://github.com/zabrodsk/plume/releases/download/v${VERSION}/" \
