@@ -3,17 +3,16 @@
     <channel>
         <title>Plume</title>
         <item>
-            <title>2.7.0</title>
-            <pubDate>Fri, 08 May 2026 21:32:45 +0200</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
+            <title>2.7.1</title>
+            <pubDate>Fri, 15 May 2026 18:37:47 +0200</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## Plume 2.7.0
+            <description sparkle:format="markdown"><![CDATA[## Plume 2.7.1
 
-- Adds one-click app updates through Sparkle.
-- Keeps the SSH browser change from 2.6.0: hidden folders are visible, hidden files remain hidden.
+- Fixes find bar (⌘F) overlapping the window title bar.
 ]]></description>
-            <enclosure url="https://github.com/zabrodsk/plume/releases/download/v2.7.0/Plume.dmg" length="1911687" type="application/octet-stream" sparkle:edSignature="OU1/5cNQuxUG2ElkrVfnUc2wN1rMlV3x51Ly3f56uWBwQsPKlVCsSWOFc+/INtw+sIKM+GI/39SPuVAGMw8jDw=="/>
+            <enclosure url="https://github.com/zabrodsk/plume/releases/download/v2.7.1/Plume.dmg" length="1909186" type="application/octet-stream" sparkle:edSignature="WfPO4RQPlZp20RZPvpFjnhdy3a9F6grwuoICVyZqEreO3COlmbSeBuTkD7Fj3/I96cb9j8tGstmrxDc0TsucAg=="/>
         </item>
     </channel>
 </rss>
