@@ -1,16 +1,46 @@
-# Plume — Roadmap to v2
+# Plume — Roadmap
 
-> v1 is two files. v2 will be three at most.
+> v1 is two files. v2 is three. v3 is still three.
 
-The brand promise survives.
+The brand promise mostly survives.
 
 - Less app, more page.
 - Source surface measured in files, not directories.
-- Universal binary under 300 KB.
+- ~~Universal binary under 300 KB.~~ **Adjusted in v3.0 to under 1 MB
+  universal** (≈470 KB per architecture). The under-300 KB line was
+  set before Sparkle and SSH; the realistic v2.7.2 baseline measured
+  ~636 KB universal. v3.0 measures ~948 KB universal — the +312 KB
+  delta is the tab strip, multi-tab state, Codable conformances, and
+  JSON persistence. Still the smallest notarized Mac editor we're
+  aware of.
 - Zero non-system dependencies.
 - Right-click → Open is fine. We don't notarize.
 
-If a feature would betray any of these, it doesn't ship in v2.
+If a feature would betray any of these, it doesn't ship.
+
+---
+
+## Shipped in v3.0
+
+- **Tabs inside one window** with a custom pill tab strip (⌘T, ⌘1–⌘9,
+  ⇧⌘] / ⇧⌘[, ⌃⇥). Each tab keeps native textarea undo, scroll, and
+  selection across switches.
+- **Multi-window**: ⌘N spawns a new window with its own tab set. Same-
+  file dedup walks every window's tab list (local URLs and SSHPath).
+- **State restoration**: windows + tabs survive relaunch via
+  `~/Library/Application Support/Plume/state.json`. Dirty drafts and
+  Untitled scratch buffers are kept; clean tabs reload from disk/SSH.
+  Defensive load renames a corrupt file to `state.corrupt.json` and
+  falls back to a fresh empty window.
+- **Opt-out**: `defaults write com.zabrodsk.Plume plume.restoreWindowsOnLaunch -bool false`.
+- **⌘N reassignment**: "New" (Untitled buffer) became ⌘T "New Tab";
+  ⌘N is now "New Window". v2 muscle memory will get one wrong window
+  on day one and adapt by day two.
+
+The "Multi-tab / multi-document" line in the v2 *out of scope* section
+below is preserved for archival reasons — it has now shipped.
+
+---
 
 ---
 

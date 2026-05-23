@@ -44,6 +44,50 @@
 
 <br>
 
+## What's new in v3.0
+
+Plume now opens **multiple files at once**, both as **tabs in one window**
+and as **separate windows**. The brand still holds — *less app, more page* —
+the chrome just learned to share.
+
+- **Tabs**: ⌘T opens a new tab; ⌘1–⌘9 jump to it; ⇧⌘] / ⇧⌘[ cycle. Each
+  tab keeps its own undo history, scroll, and selection.
+- **Windows**: ⌘N opens a new window (was "New File" in v2 — now ⌘T does
+  that). ⌘W closes the current tab, falling through to the window when
+  the last tab goes.
+- **Persistence**: your open windows and tabs come back on relaunch.
+  Unsaved drafts survive a crash. Opt out with
+  `defaults write com.zabrodsk.Plume plume.restoreWindowsOnLaunch -bool false`.
+- **Binary size**: v2.7.2 measured ~636 KB universal, v3.0 measures
+  ~948 KB. The old "under 300 KB" line in earlier ROADMAPs was set
+  before Sparkle and SSH support landed; the realistic cap going
+  forward is "under 1 MB universal" (about 470 KB per architecture).
+  Tab strip, multi-tab state, Codable conformances, and JSON
+  persistence account for the v2→v3 delta.
+
+<br>
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `⌘T` | New Tab |
+| `⌘N` | New Window |
+| `⌘O` | Open local file |
+| `⌥⌘O` | Open file via SSH |
+| `⌘S` | Save |
+| `⇧⌘S` | Save As… |
+| `⌘W` | Close Tab (or window if last tab) |
+| `⇧⌘W` | Close Window |
+| `⌘1`–`⌘9` | Jump to tab N |
+| `⇧⌘]` / `⇧⌘[` | Next / previous tab |
+| `⌃⇥` / `⌃⇧⇥` | Next / previous tab (alt) |
+| `⌘F` | Find in page |
+| `⌃⌘F` | Toggle full screen |
+| `⌘?` | Open the cheatsheet (shows everything) |
+
+<br>
+
 ## Install
 
 **Pre-built** &nbsp;→&nbsp; download [`Plume.dmg`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.dmg), drag `Plume.app` to `/Applications`. Notarized — opens with one click, no Gatekeeper warning. Future updates install through `Plume → Check for Updates…`. (Or grab [`Plume.zip`](https://github.com/zabrodsk/plume/releases/latest/download/Plume.zip) — same app, right-click → *Open* on first launch.)

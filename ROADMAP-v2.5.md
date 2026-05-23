@@ -351,7 +351,8 @@ Binary-size estimate after v2.5: **~450–490 KB**, still well under
 These remain explicit non-goals. v2.5 does not unlock them:
 
 - **Persistent sidebar.** The browse modal goes away after pick.
-- **Multi-tab beyond what `NSDocument` already gives.**
+- ~~**Multi-tab beyond what `NSDocument` already gives.**~~ **Shipped in
+  v3.0 with a custom (non-NSDocument) tab strip and multi-window.**
 - **Remote write operations** — `mkdir`, `rename`, `delete`.
 - **Concurrent multi-host editing.**
 - **Sparkle, Crashlytics, Sentry, any analytics.**
