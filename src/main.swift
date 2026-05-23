@@ -272,11 +272,10 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
     @objc func newWindow(_ sender: Any?) {
         let controller = newWindowController()
-        controller.showWindow(nil)
+        // Set flags before showWindow so the JS-ready handler picks them up.
         controller.shouldShowWelcomeIfNoPending = false
-        // A new window starts with one Untitled tab. The controller will add it
-        // once JS is ready.
         controller.startsWithEmptyUntitled = true
+        controller.showWindow(nil)
     }
 
     func setupMenu() {
