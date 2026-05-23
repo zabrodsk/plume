@@ -4,6 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Plume</title>
+<!-- v3.1 preview stack. Each sheet is scoped (most live inside .md-preview).
+     KaTeX's CSS uses fonts/* relative URLs — loaded from inside preview/ so
+     the @font-face URLs resolve to preview/fonts/*.woff2. -->
+<link rel="stylesheet" href="preview/github-markdown-light.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="preview/github-markdown-dark.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="preview/highlight-github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="preview/highlight-github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="preview/katex.min.css">
+<link rel="stylesheet" href="preview/plume-preview.css">
+<script src="preview/markdown-it.min.js" defer></script>
+<script src="preview/markdown-it-footnote.min.js" defer></script>
+<script src="preview/markdown-it-anchor.min.js" defer></script>
+<script src="preview/markdown-it-task-lists.min.js" defer></script>
+<script src="preview/markdown-it-emoji.min.js" defer></script>
+<script src="preview/markdown-it-attrs.min.js" defer></script>
+<script src="preview/highlight.min.js" defer></script>
+<script src="preview/katex.min.js" defer></script>
+<script src="preview/katex-auto-render.min.js" defer></script>
 <style>
   :root {
     --bg: #1a1815;
@@ -104,6 +122,29 @@
   .input-layer.active { display: block; }
   .input-layer::selection { background: var(--selection); }
   #textarea-pool { display: contents; }
+
+  /* Preview pool (v3.1). One .md-preview per tab; only the active one with
+     [data-active] is laid out. The pool wrapper sits inside .editor, so it
+     scrolls inside the same container as the textarea/render layers. */
+  #preview-pool { display: contents; }
+  .md-preview {
+    display: none;
+    position: relative;
+    z-index: 3;
+    /* Override editor's padding: the pane itself centers via max-width. */
+    margin-left: calc(0px - max(96px, 12vw));
+    margin-right: calc(0px - max(96px, 12vw));
+    min-height: 100%;
+    user-select: text;
+  }
+  .md-preview[data-active] { display: block; }
+
+  /* In preview mode the textarea/render/hint must be visually suppressed.
+     We mark the editor with .preview-mode to hide them without unmounting
+     (preserves per-textarea native undo). */
+  body.preview-mode .render-layer,
+  body.preview-mode .input-layer,
+  body.preview-mode .hint { display: none !important; }
 
   /* The fresh char. NO `will-change` — there's only ever ≤1 of these in the
      DOM at a time, so GPU-layer hinting is unnecessary and harmful. */
@@ -410,6 +451,9 @@
     <div class="render-layer textbox" id="render"></div>
     <!-- Textarea pool: one per tab. JS mounts/unmounts as tabs open/close. -->
     <div id="textarea-pool"></div>
+    <!-- Preview pool (v3.1): one .md-preview per tab, parallel to the textarea
+         pool. Only the active tab's pane is laid out via [data-active]. -->
+    <div id="preview-pool"></div>
   </div>
 <div id="cheatsheet">
   <div class="cheatsheet-inner">
@@ -455,10 +499,11 @@
   <div class="footer">Less app. More page.</div>
 </div>
 <script>
-  const $editor = document.getElementById('editor');
-  const $render = document.getElementById('render');
-  const $hint   = document.getElementById('hint');
-  const $pool   = document.getElementById('textarea-pool');
+  const $editor      = document.getElementById('editor');
+  const $render      = document.getElementById('render');
+  const $hint        = document.getElementById('hint');
+  const $pool        = document.getElementById('textarea-pool');
+  const $previewPool = document.getElementById('preview-pool');
   $hint.textContent = 'Start writing…';
 
   const native = (typeof window.webkit !== 'undefined' &&
@@ -468,12 +513,142 @@
   // One textarea per open tab. Inactive textareas stay in the DOM with
   // display:none so per-textarea native undo history survives tab switches.
   const _textareas = new Map();   // tabId → HTMLTextAreaElement
+  const _previews  = new Map();   // tabId → HTMLDivElement (.md-preview)
+  const _viewModes = new Map();   // tabId → "edit" | "preview"
   const _cleanFlags = new Map();  // tabId → bool; per-tab dirty tracking
   let _activeTabId = null;
   // $input always points to the active textarea (or null when no tabs).
   let $input = null;
 
   let mergeTimer = null;
+  let previewRenderTimer = null;  // debounce handle for live re-render
+
+  // ── markdown-it factory (initialized lazily after `defer` scripts load) ────
+  let _md = null;
+  function getMD() {
+    if (_md) return _md;
+    if (typeof window.markdownit !== 'function') return null;
+    const md = window.markdownit({
+      html: false,
+      linkify: true,
+      typographer: true,
+      breaks: false,
+      highlight(code, lang) {
+        if (lang && window.hljs && window.hljs.getLanguage(lang)) {
+          try {
+            return '<pre class="hljs"><code>' +
+              window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value +
+              '</code></pre>';
+          } catch (e) { /* fall through */ }
+        }
+        if (window.hljs) {
+          try {
+            return '<pre class="hljs"><code>' +
+              window.hljs.highlightAuto(code).value +
+              '</code></pre>';
+          } catch (e) { /* fall through */ }
+        }
+        // No highlight.js — escape manually.
+        const esc = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return '<pre class="hljs"><code>' + esc + '</code></pre>';
+      }
+    });
+    // Plugins. Each is global-attached by its UMD bundle.
+    try { if (window.markdownitFootnote) md.use(window.markdownitFootnote); } catch(e){}
+    try { if (window.markdownItAnchor) md.use(window.markdownItAnchor.default || window.markdownItAnchor); } catch(e){}
+    try { if (window.markdownitTaskLists) md.use(window.markdownitTaskLists, { enabled: true, label: false }); } catch(e){}
+    try {
+      const emo = window.markdownitEmoji && (window.markdownitEmoji.full || window.markdownitEmoji.light || window.markdownitEmoji);
+      if (emo) md.use(emo);
+    } catch(e){}
+    try { if (window.markdownItAttrs) md.use(window.markdownItAttrs.default || window.markdownItAttrs); } catch(e){}
+    _md = md;
+    return md;
+  }
+
+  /// Render a tab's preview pane from the textarea's current content.
+  /// Renders into a hidden staging node, then swaps the children into the
+  /// live pane after KaTeX and highlight finish — avoids first-render flash.
+  function _renderTabPreviewImpl(tabId) {
+    tabId = String(tabId);
+    const pane = _previews.get(tabId);
+    const ta   = _textareas.get(tabId);
+    if (!pane || !ta) return;
+    const md = getMD();
+    if (!md) {
+      // Libs may still be loading (defer scripts execute after this inline
+      // block parses). Show raw text, then retry once.
+      pane.textContent = ta.value;
+      setTimeout(() => _renderTabPreviewImpl(tabId), 50);
+      return;
+    }
+    const stage = document.createElement('div');
+    try {
+      stage.innerHTML = md.render(ta.value);
+    } catch (e) {
+      stage.textContent = ta.value;
+    }
+    // Run KaTeX over the staged HTML (covers $ and $$ delimiters).
+    if (typeof window.renderMathInElement === 'function') {
+      try {
+        window.renderMathInElement(stage, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$',  right: '$',  display: false },
+            { left: '\\(', right: '\\)', display: false },
+            { left: '\\[', right: '\\]', display: true },
+          ],
+          throwOnError: false
+        });
+      } catch (e) { /* keep stage as-is */ }
+    }
+    // Swap children in one shot.
+    while (pane.firstChild) pane.removeChild(pane.firstChild);
+    while (stage.firstChild) pane.appendChild(stage.firstChild);
+  }
+
+  function schedulePreviewRender(tabId) {
+    if (previewRenderTimer != null) {
+      clearTimeout(previewRenderTimer);
+    }
+    previewRenderTimer = setTimeout(() => {
+      previewRenderTimer = null;
+      requestAnimationFrame(() => _renderTabPreviewImpl(tabId));
+    }, 100);
+  }
+
+  function buildPreview(tabId) {
+    const div = document.createElement('div');
+    div.className = 'md-preview markdown-body';
+    div.setAttribute('data-tab-id', tabId);
+    return div;
+  }
+
+  function applyViewMode(tabId, mode) {
+    tabId = String(tabId);
+    _viewModes.set(tabId, mode);
+    if (tabId !== _activeTabId) return;  // visibility only matters for active tab
+    if (mode === 'preview') {
+      document.body.classList.add('preview-mode');
+      const pane = _previews.get(tabId);
+      if (pane) {
+        // Make this pane the only laid-out one.
+        for (const el of _previews.values()) el.removeAttribute('data-active');
+        pane.setAttribute('data-active', '');
+        _renderTabPreviewImpl(tabId);
+      }
+    } else {
+      document.body.classList.remove('preview-mode');
+      for (const el of _previews.values()) el.removeAttribute('data-active');
+      // Bring the textarea back into focus.
+      if ($input) {
+        // Re-run the render layer in case content changed via setTabContent.
+        setRenderText($input.value);
+        resizeTextarea();
+        $input.focus();
+      }
+    }
+  }
 
   function buildTextarea(tabId) {
     const ta = document.createElement('textarea');
@@ -496,6 +671,11 @@
       if (native && native.dirty) {
         native.dirty.postMessage({ tabId: _activeTabId });
       }
+    }
+    // v3.1: when in preview, debounce-render the preview pane so live edits
+    // are reflected. Edit mode is unchanged.
+    if (_viewModes.get(_activeTabId) === 'preview') {
+      schedulePreviewRender(_activeTabId);
     }
   }
 
@@ -955,12 +1135,28 @@
       _textareas.set(tabId, ta);
       _cleanFlags.set(tabId, true);
       $pool.appendChild(ta);
+      // v3.1: mount a parallel preview pane. Mode defaults to "edit"; native
+      // will call setTabViewMode shortly with the persisted mode.
+      if (!_previews.has(tabId)) {
+        const pane = buildPreview(tabId);
+        _previews.set(tabId, pane);
+        _viewModes.set(tabId, 'edit');
+        $previewPool.appendChild(pane);
+      }
     },
     activateTab(tabId) {
       tabId = String(tabId);
       const ta = _textareas.get(tabId);
       if (!ta) return;
-      if (_activeTabId === tabId) { ta.focus(); return; }
+      if (_activeTabId === tabId) {
+        // Already active — focus the right surface.
+        if (_viewModes.get(tabId) === 'preview') {
+          /* preview is non-focusable; leave focus alone */
+        } else {
+          ta.focus();
+        }
+        return;
+      }
       // Hide previous active.
       if ($input) $input.classList.remove('active');
       // Cancel any pending merge from the previous tab's fresh-char animation.
@@ -973,7 +1169,10 @@
       setRenderText(ta.value);
       resizeTextarea();
       updateHint();
-      ta.focus();
+      // Re-apply the new tab's persisted view mode (preview or edit).
+      const mode = _viewModes.get(tabId) || 'edit';
+      applyViewMode(tabId, mode);
+      if (mode === 'edit') ta.focus();
     },
     closeTab(tabId) {
       tabId = String(tabId);
@@ -982,10 +1181,27 @@
       if (ta.parentNode) ta.parentNode.removeChild(ta);
       _textareas.delete(tabId);
       _cleanFlags.delete(tabId);
+      const pane = _previews.get(tabId);
+      if (pane && pane.parentNode) pane.parentNode.removeChild(pane);
+      _previews.delete(tabId);
+      _viewModes.delete(tabId);
       if (_activeTabId === tabId) {
         _activeTabId = null;
         $input = null;
+        document.body.classList.remove('preview-mode');
       }
+    },
+    /// Set per-tab view mode. Native-driven on ⌘E; safe to call before openTab
+    /// (the mode is cached and applied when the pane is built).
+    setTabViewMode(tabId, mode) {
+      tabId = String(tabId);
+      const m = (mode === 'preview') ? 'preview' : 'edit';
+      _viewModes.set(tabId, m);
+      applyViewMode(tabId, m);
+    },
+    /// Force a preview re-render (e.g. after setTabContent in preview mode).
+    renderTabPreview(tabId) {
+      _renderTabPreviewImpl(tabId);
     },
     getTabContent(tabId) {
       const ta = _textareas.get(String(tabId));
@@ -995,15 +1211,20 @@
     // Save As, where losing undo is acceptable). Per the architecture rule, do
     // not call this on the active tab unless you accept the undo loss.
     setTabContent(tabId, content, _path) {
-      const ta = _textareas.get(String(tabId));
+      tabId = String(tabId);
+      const ta = _textareas.get(tabId);
       if (!ta) return;
       ta.value = (content == null) ? '' : String(content);
-      _cleanFlags.set(String(tabId), true);
-      if (String(tabId) === _activeTabId) {
+      _cleanFlags.set(tabId, true);
+      if (tabId === _activeTabId) {
         if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
         setRenderText(ta.value);
         resizeTextarea();
         updateHint();
+      }
+      // Refresh preview if it's mounted for this tab.
+      if (_previews.has(tabId) && _viewModes.get(tabId) === 'preview') {
+        _renderTabPreviewImpl(tabId);
       }
     },
     markTabClean(tabId) {
@@ -1036,14 +1257,25 @@
     matches: [],
     current: -1,
     query: '',
+    inPreview: false,    // routes search ops to .md-preview when true
+    previewMarks: [],    // <mark> nodes currently injected into the preview
+
+    /// True iff the active tab is in preview mode right now.
+    isPreviewActive() {
+      return _activeTabId && _viewModes.get(_activeTabId) === 'preview';
+    },
 
     open() {
-      if (!$input) return;
+      const previewActive = find.isPreviewActive();
+      if (!$input && !previewActive) return;
+      find.inPreview = previewActive;
       find.active = true;
       document.body.classList.add('has-find');
       $findbar.classList.add('visible');
-      const sel = $input.value.slice($input.selectionStart, $input.selectionEnd);
-      if (sel) $findinput.value = sel;
+      if (!previewActive) {
+        const sel = $input.value.slice($input.selectionStart, $input.selectionEnd);
+        if (sel) $findinput.value = sel;
+      }
       $findinput.focus();
       $findinput.select();
       find.setQuery($findinput.value);
@@ -1054,16 +1286,90 @@
       document.body.classList.remove('has-find');
       $findbar.classList.remove('visible');
       if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
-      if ($input) {
+      if (find.inPreview) {
+        find.clearPreviewMarks();
+        find.inPreview = false;
+      } else if ($input) {
         setRenderText($input.value);
         resizeTextarea();
         $input.focus();
       }
     },
 
+    /// Strip any <mark class="plume-find-mark"> nodes from the preview,
+    /// merging their text back into adjacent text nodes.
+    clearPreviewMarks() {
+      const pane = _activeTabId ? _previews.get(_activeTabId) : null;
+      if (!pane) { find.previewMarks = []; return; }
+      const marks = Array.from(pane.querySelectorAll('mark.plume-find-mark'));
+      for (const m of marks) {
+        const parent = m.parentNode;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+        parent.normalize();
+      }
+      find.previewMarks = [];
+    },
+
+    /// Walk text nodes in the active preview pane and wrap matches of `q`
+    /// in <mark class="plume-find-mark"> spans. Skips text inside <script>,
+    /// <style>, and existing <mark>s.
+    highlightInPreview(q) {
+      find.clearPreviewMarks();
+      const pane = _activeTabId ? _previews.get(_activeTabId) : null;
+      if (!pane || !q) return;
+      const lq = q.toLowerCase();
+      const skip = new Set(['SCRIPT','STYLE','MARK','TEXTAREA']);
+      const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue || node.nodeValue.length === 0) return NodeFilter.FILTER_REJECT;
+          let p = node.parentNode;
+          while (p && p !== pane) {
+            if (skip.has(p.nodeName)) return NodeFilter.FILTER_REJECT;
+            p = p.parentNode;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const nodes = [];
+      let n; while ((n = walker.nextNode())) nodes.push(n);
+      const marks = [];
+      for (const node of nodes) {
+        const text = node.nodeValue;
+        const lower = text.toLowerCase();
+        let idx = lower.indexOf(lq);
+        if (idx === -1) continue;
+        const parent = node.parentNode;
+        let cursor = 0;
+        const frag = document.createDocumentFragment();
+        while (idx !== -1) {
+          if (idx > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, idx)));
+          const mark = document.createElement('mark');
+          mark.className = 'plume-find-mark';
+          mark.textContent = text.slice(idx, idx + lq.length);
+          frag.appendChild(mark);
+          marks.push(mark);
+          cursor = idx + lq.length;
+          idx = lower.indexOf(lq, cursor);
+        }
+        if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+        parent.replaceChild(frag, node);
+      }
+      find.previewMarks = marks;
+    },
+
     setQuery(q) {
       find.query = q;
       find.matches = [];
+      if (find.inPreview) {
+        find.highlightInPreview(q);
+        // Mirror count into the standard match counter so updateStatus works.
+        find.matches = find.previewMarks.map(() => ({ start: 0, end: 0 }));
+        find.current = find.matches.length > 0 ? 0 : -1;
+        find.updateStatus();
+        find.refocusPreviewCurrent();
+        return;
+      }
       if (q.length > 0 && $input) {
         const text = $input.value;
         const lower = text.toLowerCase();
@@ -1084,13 +1390,25 @@
     next() {
       if (find.matches.length === 0) return;
       find.current = (find.current + 1) % find.matches.length;
-      find.highlight();
+      if (find.inPreview) { find.refocusPreviewCurrent(); find.updateStatus(); }
+      else { find.highlight(); }
     },
 
     prev() {
       if (find.matches.length === 0) return;
       find.current = (find.current - 1 + find.matches.length) % find.matches.length;
-      find.highlight();
+      if (find.inPreview) { find.refocusPreviewCurrent(); find.updateStatus(); }
+      else { find.highlight(); }
+    },
+
+    refocusPreviewCurrent() {
+      for (let i = 0; i < find.previewMarks.length; i++) {
+        if (i === find.current) find.previewMarks[i].classList.add('mark-current');
+        else find.previewMarks[i].classList.remove('mark-current');
+      }
+      if (find.current >= 0 && find.previewMarks[find.current]) {
+        find.previewMarks[find.current].scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
     },
 
     updateStatus() {
