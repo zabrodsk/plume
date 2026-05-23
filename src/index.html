@@ -46,11 +46,12 @@
   }
 
   .editor {
-    /* The scroll container starts BELOW the title bar (and below the find bar
-       when open). Using `top` instead of `padding-top` prevents scrolled text
-       from rendering into the safe zone, which is visible behind the transparent
-       NSWindow title bar (fullSizeContentView) and in the gap below the find bar. */
-    position: absolute; top: 64px; right: 0; bottom: 0; left: 0;
+    /* The scroll container starts BELOW the title bar + tab strip (and below
+       the find bar when open). Using `top` instead of `padding-top` prevents
+       scrolled text from rendering into the safe zone, which is visible behind
+       the transparent NSWindow title bar (fullSizeContentView) and in the gap
+       below the find bar. Tab strip adds 36px. */
+    position: absolute; top: 100px; right: 0; bottom: 0; left: 0;
     padding: 0 max(96px, 12vw) 48px;
     overflow-y: auto; overflow-x: hidden;
     cursor: text;
@@ -128,7 +129,7 @@
   #findbar {
     display: none;
     position: absolute;
-    top: 28px; left: 0; right: 0;
+    top: 64px; left: 0; right: 0;
     height: 40px;
     background: var(--bg);
     border-bottom: 1px solid var(--ghost);
@@ -139,7 +140,109 @@
   }
   #findbar.visible { display: flex; }
 
-  body.has-find .editor { top: 104px; }
+  body.has-find .editor { top: 140px; }
+
+  /* Tab strip */
+  #tabstrip {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 36px;
+    z-index: 11;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: drag;
+    user-select: none;
+    background: transparent;
+  }
+  #tabstrip-spacer {
+    width: 78px;
+    height: 100%;
+    flex-shrink: 0;
+  }
+  body.fullscreen #tabstrip-spacer { width: 0; }
+  #tablist {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 1;
+    min-width: 0;
+  }
+  #tablist::-webkit-scrollbar { display: none; }
+  .tab {
+    -webkit-app-region: no-drag;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    color: var(--ghost);
+    cursor: default;
+    flex-shrink: 0;
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  @media (prefers-color-scheme: light) {
+    .tab.active { background: rgba(0, 0, 0, 0.04); }
+  }
+  .tab .tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .tab .tab-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--ink);
+    opacity: 0.7;
+    flex-shrink: 0;
+    display: none;
+  }
+  .tab.dirty .tab-dot { display: inline-block; }
+  .tab .tab-close {
+    -webkit-app-region: no-drag;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--ghost);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .tab:hover .tab-close { display: inline-flex; }
+  .tab .tab-close:hover { color: var(--ink); background: rgba(255,255,255,0.08); }
+  @media (prefers-color-scheme: light) {
+    .tab .tab-close:hover { background: rgba(0,0,0,0.06); }
+  }
+  #tab-add {
+    -webkit-app-region: no-drag;
+    background: none;
+    border: none;
+    color: var(--ghost);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 12px;
+    height: 26px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #tab-add:hover { color: var(--ink); }
 
   #findinput {
     flex: 1;
@@ -283,6 +386,11 @@
 </style>
 </head>
 <body>
+  <div id="tabstrip">
+    <div id="tabstrip-spacer"></div>
+    <div id="tablist"></div>
+    <button id="tab-add" title="New Tab">+</button>
+  </div>
   <div id="findbar">
     <input type="text" id="findinput" placeholder="Find" autocomplete="off" spellcheck="false">
     <span id="findstatus"></span>
@@ -358,6 +466,11 @@
   function notifyDirty() {
     if (clean && native && native.dirty) native.dirty.postMessage(true);
     clean = false;
+    // Reflect dirty state in the single Phase-B tab.
+    if (typeof _tabs !== 'undefined' && _tabs && _tabs.length === 1 && !_tabs[0].dirty) {
+      _tabs[0].dirty = true;
+      if (typeof renderTabs === 'function') renderTabs();
+    }
   }
 
   // ── Syntax highlighting tokenizers ─────────────────────────────────────────
@@ -747,8 +860,60 @@
 
   window.addEventListener('resize', resizeTextarea);
 
+  // ── Tab strip ──────────────────────────────────────────────────────────────
+  const $tablist = document.getElementById('tablist');
+  const $tabAdd  = document.getElementById('tab-add');
+
+  // Phase B: tab strip is a thin view layer. We just render whatever the
+  // native side hands us via setTabs. Phase C wires this up to a real
+  // textarea pool; for now it follows the single active document.
+  let _tabs = [{ id: 'phase-b-default', title: 'Untitled', dirty: false, active: true }];
+
+  function renderTabs() {
+    while ($tablist.firstChild) $tablist.removeChild($tablist.firstChild);
+    for (const t of _tabs) {
+      const el = document.createElement('div');
+      el.className = 'tab' + (t.active ? ' active' : '') + (t.dirty ? ' dirty' : '');
+      el.setAttribute('data-tab-id', t.id);
+      const dot = document.createElement('span'); dot.className = 'tab-dot';
+      const title = document.createElement('span'); title.className = 'tab-title';
+      title.textContent = t.title;
+      const close = document.createElement('span'); close.className = 'tab-close'; close.textContent = '×';
+      close.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        postTabAction('close', t.id);
+      });
+      el.appendChild(dot);
+      el.appendChild(title);
+      el.appendChild(close);
+      el.addEventListener('mousedown', (e) => {
+        // Middle click closes.
+        if (e.button === 1) {
+          e.preventDefault();
+          postTabAction('close', t.id);
+          return;
+        }
+        if (e.button !== 0) return;
+        if (!t.active) postTabAction('select', t.id);
+      });
+      $tablist.appendChild(el);
+    }
+  }
+
+  function postTabAction(kind, tabId) {
+    if (native && native.tabAction) {
+      native.tabAction.postMessage({ kind, tabId: tabId || null });
+    }
+  }
+
+  $tabAdd.addEventListener('click', () => postTabAction('new', null));
+
+  renderTabs();
+
+  // ── End Tab strip ──────────────────────────────────────────────────────────
+
   window.creamyAPI = {
-    setContent(text, _path) {
+    setContent(text, path) {
       if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
       const t = (text == null) ? '' : String(text);
       $input.value = t;
@@ -758,9 +923,32 @@
       $input.setSelectionRange(0, 0);
       $input.focus();
       clean = true;
+      // Phase B: keep the single tab's title in sync with the current document.
+      if (_tabs.length === 1) {
+        _tabs[0].title = path ? path.split('/').pop() : 'Untitled';
+        _tabs[0].dirty = false;
+        renderTabs();
+      }
     },
     getContent() { return $input.value; },
-    markClean() { clean = true; }
+    markClean() {
+      clean = true;
+      if (_tabs.length === 1) { _tabs[0].dirty = false; renderTabs(); }
+    },
+    setTabs(tabs) {
+      // Native is the source of truth for the tab list.
+      _tabs = (tabs || []).map(t => ({
+        id: String(t.id),
+        title: String(t.title || 'Untitled'),
+        dirty: !!t.dirty,
+        active: !!t.active
+      }));
+      renderTabs();
+    },
+    setFullscreen(on) {
+      if (on) document.body.classList.add('fullscreen');
+      else document.body.classList.remove('fullscreen');
+    }
   };
 
   // ── Find-in-page ────────────────────────────────────────────────────────────

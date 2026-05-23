@@ -480,6 +480,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         ucc.add(self, name: "dirty")
         ucc.add(self, name: "ready")
         ucc.add(self, name: "openURL")
+        ucc.add(self, name: "tabAction")
         config.userContentController = ucc
 
         let prefs = WKPreferences()
@@ -499,6 +500,24 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
         window.contentView = webView
         updateTitle()
+
+        // Fullscreen observers — toggle body.fullscreen so the tab-strip spacer collapses.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleWillEnterFullScreen(_:)),
+            name: NSWindow.willEnterFullScreenNotification, object: window
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleWillExitFullScreen(_:)),
+            name: NSWindow.willExitFullScreenNotification, object: window
+        )
+    }
+
+    @objc private func handleWillEnterFullScreen(_ note: Notification) {
+        webView.evaluateJavaScript("window.creamyAPI && window.creamyAPI.setFullscreen && window.creamyAPI.setFullscreen(true)")
+    }
+
+    @objc private func handleWillExitFullScreen(_ note: Notification) {
+        webView.evaluateJavaScript("window.creamyAPI && window.creamyAPI.setFullscreen && window.creamyAPI.setFullscreen(false)")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
@@ -921,6 +940,10 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
             if let s = message.body as? String, let url = URL(string: s) {
                 NSWorkspace.shared.open(url)
             }
+        case "tabAction":
+            // Phase B stub: tab strip is single-tab and read-only from native.
+            // Phase C replaces this with real tab dispatch.
+            break
         default:
             break
         }
