@@ -19,7 +19,7 @@
 
   /* Layout: parallel to the editor, same top inset rules. The pool wrapper
    * pins position; this just sets the typographic frame. */
-  max-width: 720px;
+  max-width: 920px;
   margin: 0 auto;
   padding: 0 8px 40vh;
 

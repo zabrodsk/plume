@@ -131,9 +131,6 @@
     display: none;
     position: relative;
     z-index: 3;
-    /* Override editor's padding: the pane itself centers via max-width. */
-    margin-left: calc(0px - max(96px, 12vw));
-    margin-right: calc(0px - max(96px, 12vw));
     min-height: 100%;
     user-select: text;
   }
@@ -159,7 +156,7 @@
 
   .hint {
     position: absolute;
-    top: 100px;
+    top: 0;
     left: max(96px, 12vw);
     color: var(--ghost);
     font-size: 17px;
@@ -187,7 +184,6 @@
   #findbar.visible { display: flex; }
 
   body.has-find .editor { top: 140px; }
-  body.has-find .hint { top: 140px; }
 
   /* Tab strip */
   #tabstrip {

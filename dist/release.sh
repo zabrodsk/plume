@@ -92,19 +92,17 @@ cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
 cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<NOTES
 ## Plume ${VERSION}
 
-The biggest update since Plume first shipped.
+Patch release fixing layout issues spotted right after 3.1.0 shipped.
 
-### What's new
+### Fixes
 
-- **Tabs** — \`⌘T\` opens a new tab; \`⌘1\`–\`⌘9\` jump to it; \`⇧⌘]\` / \`⇧⌘[\` cycle. Each tab keeps its own undo, scroll, and selection.
-- **Multi-window** — \`⌘N\` opens a new window. Tabs in window A stay independent of window B. (Heads up: \`⌘N\` used to be New Document — that's \`⌘T\` now.)
-- **Preview** — \`⌘E\` toggles rendered Markdown. Headings, bold, lists, links, fenced code with syntax highlighting, tables, blockquotes, footnotes, task lists, and LaTeX math. Per tab.
-- **Persistence** — open windows, tabs, and unsaved drafts come back on relaunch. Opt out: \`defaults write com.zabrodsk.Plume plume.restoreWindowsOnLaunch -bool false\`.
+- **Edit mode**: the "Start writing…" hint now sits at the same baseline as the cursor (was rendering ~100 px below it).
+- **Preview pane**: now centered with comfortable margins on both sides (was anchored to the window's left edge with empty space on the right).
+- **Preview width**: bumped from 720 to 920 px max content width for more horizontal room on wide windows.
 
-### Notes
+### From 3.1.0 (still applies)
 
-- Binary is now ~950 KB universal (was ~200 KB in v2). The brand line shifts to "under 1 MB binary"; the bundle gains ~1 MB for the vendored markdown renderer (markdown-it, highlight.js, KaTeX). Worth it for a writing tool with a polished preview.
-- macOS 26 (Tahoe) chrome geometry is measured dynamically — the tab strip self-corrects on any macOS.
+Plume opens **multiple files at once** with \`⌘T\` (tabs) and \`⌘N\` (windows), and toggles a **rendered Markdown preview** with \`⌘E\` — headings, code with syntax highlighting, tables, footnotes, task lists, LaTeX math. Open windows and unsaved drafts come back on relaunch.
 NOTES
 "${SPARKLE_CACHE}/bin/generate_appcast" \
   --download-url-prefix "https://github.com/zabrodsk/plume/releases/download/v${VERSION}/" \
