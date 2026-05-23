@@ -113,6 +113,7 @@ enum PlumeState {
         var ssh: SSH?
         var contentDraft: String?  // present only when dirty or untitled
         var isDirty: Bool
+        var viewMode: String = "edit"   // "edit" | "preview"  (added in schema v2)
     }
     struct SSH: Codable {
         var user: String?
@@ -120,7 +121,11 @@ enum PlumeState {
         var path: String
     }
 
-    static let currentVersion = 1
+    /// Schema bumps:
+    ///   v1 — windows + tabs (no per-tab viewMode). Plume v3.0.
+    ///   v2 — adds viewMode per tab. Plume v3.1+. v1 files load transparently:
+    ///        every tab defaults to "edit" and the file is rewritten as v2 on save.
+    static let currentVersion = 2
     static let restoreOnLaunchKey = "plume.restoreWindowsOnLaunch"
 
     static func stateURL() -> URL? {
@@ -144,6 +149,16 @@ enum PlumeState {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(File.self, from: data)
+            // v1 → v2 transparent migration: TabRecord.viewMode defaults to "edit"
+            // because of the property's default value, so a v1 file decodes fine.
+            // We rewrite it as v2 on the next save by bumping version here.
+            if decoded.version == 1 {
+                var migrated = decoded
+                migrated.version = currentVersion
+                // Best-effort write-back so the next launch sees v2 directly.
+                save(migrated)
+                return migrated
+            }
             guard decoded.version == currentVersion else {
                 quarantine(url, reason: "version mismatch (\(decoded.version) != \(currentVersion))")
                 return nil
@@ -181,6 +196,12 @@ enum PlumeState {
 
 // MARK: - Tab model
 
+/// Per-tab rendering mode. Each tab toggles independently via ⌘E.
+enum TabViewMode: String, Codable {
+    case edit
+    case preview
+}
+
 /// One open document inside a PlumeWindowController. JS owns the live buffer between
 /// snapshots; `content` is refreshed at save / switch / close / persistence checkpoints.
 final class Tab {
@@ -188,12 +209,15 @@ final class Tab {
     var source: FileSource?
     var content: String
     var isDirty: Bool
+    var viewMode: TabViewMode
 
-    init(id: UUID = UUID(), source: FileSource? = nil, content: String = "", isDirty: Bool = false) {
+    init(id: UUID = UUID(), source: FileSource? = nil, content: String = "",
+         isDirty: Bool = false, viewMode: TabViewMode = .edit) {
         self.id = id
         self.source = source
         self.content = content
         self.isDirty = isDirty
+        self.viewMode = viewMode
     }
 
     var title: String { source?.displayName ?? "Untitled" }
@@ -301,7 +325,8 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
                         kind: "untitled",
                         url: nil, ssh: nil,
                         contentDraft: nil,
-                        isDirty: tab.isDirty
+                        isDirty: tab.isDirty,
+                        viewMode: tab.viewMode.rawValue
                     )
                     switch tab.source {
                     case .local(let url):
@@ -605,6 +630,13 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
+        let togglePreview = NSMenuItem(title: "Toggle Preview",
+                                       action: #selector(PlumeWindowController.togglePreview),
+                                       keyEquivalent: "e")
+        togglePreview.keyEquivalentModifierMask = [.command]
+        togglePreview.target = nil
+        viewMenu.addItem(togglePreview)
+        viewMenu.addItem(.separator())
         let fullScreen = NSMenuItem(title: "Toggle Full Screen",
                                     action: #selector(NSWindow.toggleFullScreen(_:)),
                                     keyEquivalent: "f")
@@ -738,7 +770,7 @@ extension AppDelegate: NSMenuDelegate {
 
 // MARK: - Plume window controller
 
-final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScriptMessageHandler {
+final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScriptMessageHandler, NSUserInterfaceValidations {
 
     private unowned let appDelegate: AppDelegate
 
@@ -791,6 +823,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         ucc.add(self, name: "ready")
         ucc.add(self, name: "openURL")
         ucc.add(self, name: "tabAction")
+        ucc.add(self, name: "viewModeChanged")
         config.userContentController = ucc
 
         let prefs = WKPreferences()
@@ -891,6 +924,10 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     private func performActivate(id: UUID) {
         activeTabId = id
         webView.evaluateJavaScript("window.creamyAPI.activateTab('\(id.uuidString)')")
+        // Re-assert the activated tab's view mode so the JS pane swap matches.
+        if let tab = self.tab(withId: id) {
+            applyTabViewMode(tab)
+        }
         updateTitle()
         refreshTabStrip()
     }
@@ -1060,6 +1097,34 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
     @objc func performFind() {
         webView.evaluateJavaScript("window.find_open && window.find_open()")
+    }
+
+    /// Push the tab's current viewMode to JS. Safe to call before JS is ready —
+    /// the eval becomes a no-op then; once JS catches up, the next toggle or
+    /// activate refreshes it.
+    func applyTabViewMode(_ tab: Tab) {
+        let mode = tab.viewMode.rawValue
+        webView.evaluateJavaScript(
+            "window.creamyAPI && window.creamyAPI.setTabViewMode && window.creamyAPI.setTabViewMode('\(tab.id.uuidString)', '\(mode)')"
+        )
+    }
+
+    /// ⌘E — toggle the active tab between edit and preview.
+    @objc func togglePreview() {
+        guard let tab = activeTab else { return }
+        tab.viewMode = (tab.viewMode == .edit) ? .preview : .edit
+        applyTabViewMode(tab)
+        appDelegate.scheduleStateSave()
+    }
+
+    /// Grey Cut/Paste when the active tab is in preview mode. Everything else
+    /// (including Copy and Find) stays available.
+    func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        let action = item.action
+        if action == #selector(NSText.cut(_:)) || action == #selector(NSText.paste(_:)) {
+            return activeTab?.viewMode != .preview
+        }
+        return true
     }
 
     @objc func showCheatsheet() {
@@ -1436,6 +1501,19 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
             default:
                 break
             }
+        case "viewModeChanged":
+            // Payload: { tabId: "uuid", mode: "edit"|"preview" }
+            if let dict = message.body as? [String: Any],
+               let tabIdStr = dict["tabId"] as? String,
+               let tabId = UUID(uuidString: tabIdStr),
+               let modeStr = dict["mode"] as? String,
+               let mode = TabViewMode(rawValue: modeStr),
+               let tab = self.tab(withId: tabId) {
+                if tab.viewMode != mode {
+                    tab.viewMode = mode
+                    appDelegate.scheduleStateSave()
+                }
+            }
         default:
             break
         }
@@ -1479,25 +1557,28 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     private func restoreTabs(_ records: [PlumeState.TabRecord], activeIndex: Int) {
         for rec in records {
             let id = UUID(uuidString: rec.id) ?? UUID()
+            let mode = TabViewMode(rawValue: rec.viewMode) ?? .edit
             switch rec.kind {
             case "local":
                 if let urlStr = rec.url, let url = URL(string: urlStr) {
                     if rec.isDirty, let draft = rec.contentDraft {
-                        let tab = Tab(id: id, source: .local(url), content: draft, isDirty: true)
+                        let tab = Tab(id: id, source: .local(url), content: draft, isDirty: true, viewMode: mode)
                         tabs.append(tab)
                         let jsContent = encodeForJS(draft)
                         webView.evaluateJavaScript(
                             "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(url.path)))"
                         )
+                        applyTabViewMode(tab)
                     } else {
                         // Clean — reload from disk.
                         if let content = try? String(contentsOf: url, encoding: .utf8) {
-                            let tab = Tab(id: id, source: .local(url), content: content, isDirty: false)
+                            let tab = Tab(id: id, source: .local(url), content: content, isDirty: false, viewMode: mode)
                             tabs.append(tab)
                             let jsContent = encodeForJS(content)
                             webView.evaluateJavaScript(
                                 "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(url.path)))"
                             )
+                            applyTabViewMode(tab)
                         }
                     }
                 }
@@ -1505,31 +1586,34 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
                 if let ssh = rec.ssh {
                     let remote = SSHPath(user: ssh.user, host: ssh.host, path: ssh.path)
                     if rec.isDirty, let draft = rec.contentDraft {
-                        let tab = Tab(id: id, source: .remote(remote), content: draft, isDirty: true)
+                        let tab = Tab(id: id, source: .remote(remote), content: draft, isDirty: true, viewMode: mode)
                         tabs.append(tab)
                         let jsContent = encodeForJS(draft)
                         webView.evaluateJavaScript(
                             "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(remote.display)))"
                         )
+                        applyTabViewMode(tab)
                     } else {
                         // Clean — create placeholder tab and fire SSH read.
-                        let tab = Tab(id: id, source: .remote(remote), content: "", isDirty: false)
+                        let tab = Tab(id: id, source: .remote(remote), content: "", isDirty: false, viewMode: mode)
                         tabs.append(tab)
                         webView.evaluateJavaScript(
                             "window.creamyAPI.openTab('\(tab.id.uuidString)', '', \(encodeForJS(remote.display)))"
                         )
+                        applyTabViewMode(tab)
                         beginRemoteRead(remote, into: tab)
                     }
                 }
             default:
                 // Untitled — only meaningful if we have a draft.
                 let draft = rec.contentDraft ?? ""
-                let tab = Tab(id: id, source: nil, content: draft, isDirty: rec.isDirty)
+                let tab = Tab(id: id, source: nil, content: draft, isDirty: rec.isDirty, viewMode: mode)
                 tabs.append(tab)
                 let jsContent = encodeForJS(draft)
                 webView.evaluateJavaScript(
                     "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), null)"
                 )
+                applyTabViewMode(tab)
             }
         }
         // If nothing restored (e.g. all local files vanished), open an empty Untitled.
