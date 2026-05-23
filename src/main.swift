@@ -253,6 +253,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [PlumeWindowController] = []
     var pendingFileToOpen: URL?
     var pendingRemoteToOpen: SSHPath?
+    /// True once applicationDidFinishLaunching has completed. application(_:open:)
+    /// can fire BEFORE that on a file-driven launch — in that case we stash the
+    /// pending URL and let applicationDidFinishLaunching route it into the
+    /// window(s) it creates, instead of spawning a separate window here.
+    private var didFinishLaunching = false
     var updaterController: SPUStandardUpdaterController!
 
     // Version-keyed so future releases can independently decide whether to show a new welcome.
@@ -306,9 +311,23 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         let shouldRestore = UserDefaults.standard.bool(forKey: PlumeState.restoreOnLaunchKey)
         if shouldRestore, let state = PlumeState.load(), !state.windows.isEmpty {
             restore(state)
+            // If application(_:open:) fired earlier in the launch sequence and
+            // stashed a pending file/remote, route it into the first restored
+            // controller as a new tab rather than spawning a separate window.
+            if let controller = windows.first {
+                if let url = pendingFileToOpen {
+                    pendingFileToOpen = nil
+                    controller.pendingFileToOpen = url
+                }
+                if let remote = pendingRemoteToOpen {
+                    pendingRemoteToOpen = nil
+                    controller.pendingRemoteToOpen = remote
+                }
+            }
         } else {
             spawnInitialWindow()
         }
+        didFinishLaunching = true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -469,9 +488,16 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         }
         if let controller = activeWindowController() {
             controller.openLocalAsNewTab(url)
-        } else {
+        } else if didFinishLaunching {
+            // No windows but the app is past launch (user closed them all).
+            // Spawn a fresh window with the file.
             pendingFileToOpen = url
             spawnInitialWindow()
+        } else {
+            // application(_:open:) fired BEFORE applicationDidFinishLaunching
+            // (file-driven launch). Stash; applicationDidFinishLaunching will
+            // route this into one of the windows it creates.
+            pendingFileToOpen = url
         }
     }
 
@@ -487,9 +513,11 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         }
         if let controller = activeWindowController() {
             controller.openRemoteAsNewTab(remote)
-        } else {
+        } else if didFinishLaunching {
             pendingRemoteToOpen = remote
             spawnInitialWindow()
+        } else {
+            pendingRemoteToOpen = remote
         }
     }
 
@@ -1573,7 +1601,10 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         if let records = pendingRestoreTabs, !records.isEmpty {
             pendingRestoreTabs = nil
             restoreTabs(records, activeIndex: pendingRestoreActiveIndex)
-            return
+            // Fall through: when launching with both saved state and a
+            // pending file, the AppDelegate routes the file URL onto the
+            // first restored controller via pendingFileToOpen. Process it
+            // here so the file lands as a new tab in the same window.
         }
         if let url = pendingFileToOpen {
             pendingFileToOpen = nil

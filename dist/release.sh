@@ -92,15 +92,13 @@ cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
 cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<NOTES
 ## Plume ${VERSION}
 
-Patch release fixing layout issues spotted right after 3.1.0 shipped.
+Patch: opening a markdown file from Finder no longer spawns two windows.
 
-### Fixes
+### Fix
 
-- **Edit mode**: the "Start writing…" hint now sits at the same baseline as the cursor (was rendering ~100 px below it).
-- **Preview pane**: now centered with comfortable margins on both sides (was anchored to the window's left edge with empty space on the right).
-- **Preview width**: bumped from 720 to 920 px max content width for more horizontal room on wide windows.
+- **Launch-via-file**: double-clicking a \`.md\` file in Finder used to create *two* windows (an empty Untitled and another holding the opened file). macOS delivers the file-open event during the launch sequence, before \`applicationDidFinishLaunching\` runs — Plume's launch handler then created its own window unaware that one already existed. Now there's a single source of truth for launch-time window creation, and any pending file URL lands as a tab in that window (or in a tab inside a restored window when state restoration is on).
 
-### From 3.1.0 (still applies)
+### From 3.1.0/3.1.1 (still applies)
 
 Plume opens **multiple files at once** with \`⌘T\` (tabs) and \`⌘N\` (windows), and toggles a **rendered Markdown preview** with \`⌘E\` — headings, code with syntax highlighting, tables, footnotes, task lists, LaTeX math. Open windows and unsaved drafts come back on relaunch.
 NOTES
