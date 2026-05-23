@@ -823,7 +823,10 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         let window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
-        window.titleVisibility = .visible
+        // The tab strip renders the active tab's filename; hiding the native
+        // title prevents AppKit from drawing it on top of the traffic-light
+        // zone (where it would overlap the tab pill).
+        window.titleVisibility = .hidden
         window.center()
         let bgColor = NSColor(name: nil) { appearance in
             if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
@@ -910,7 +913,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         let clearance: CGFloat
         if let zoom = window.standardWindowButton(.zoomButton) {
             let frameInWindow = zoom.convert(zoom.bounds, to: nil)
-            clearance = frameInWindow.maxX + 10
+            clearance = frameInWindow.maxX + 14
         } else {
             clearance = 100
         }
