@@ -90,6 +90,95 @@ private extension NSButton {
     }
 }
 
+// MARK: - Persistence
+
+/// Lightweight JSON-on-disk state used to restore windows and tabs across launches.
+/// Schema is versioned; defensive load renames the file to state.corrupt.json on any
+/// parse failure rather than crashing.
+enum PlumeState {
+
+    struct File: Codable {
+        var version: Int
+        var windows: [Window]
+    }
+    struct Window: Codable {
+        var frame: String          // NSStringFromRect form
+        var activeTabIndex: Int
+        var tabs: [TabRecord]
+    }
+    struct TabRecord: Codable {
+        var id: String             // UUID string
+        var kind: String           // "local" | "remote" | "untitled"
+        var url: String?           // file URL string
+        var ssh: SSH?
+        var contentDraft: String?  // present only when dirty or untitled
+        var isDirty: Bool
+    }
+    struct SSH: Codable {
+        var user: String?
+        var host: String
+        var path: String
+    }
+
+    static let currentVersion = 1
+    static let restoreOnLaunchKey = "plume.restoreWindowsOnLaunch"
+
+    static func stateURL() -> URL? {
+        do {
+            let support = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: true
+            )
+            let dir = support.appendingPathComponent("Plume", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("state.json")
+        } catch {
+            FileHandle.standardError.write(Data("Plume: failed to resolve state directory: \(error)\n".utf8))
+            return nil
+        }
+    }
+
+    static func load() -> File? {
+        guard let url = stateURL() else { return nil }
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoded = try JSONDecoder().decode(File.self, from: data)
+            guard decoded.version == currentVersion else {
+                quarantine(url, reason: "version mismatch (\(decoded.version) != \(currentVersion))")
+                return nil
+            }
+            return decoded
+        } catch {
+            quarantine(url, reason: "decode failed: \(error)")
+            return nil
+        }
+    }
+
+    static func save(_ file: File) {
+        guard let url = stateURL() else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            let data = try encoder.encode(file)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            FileHandle.standardError.write(Data("Plume: failed to save state: \(error)\n".utf8))
+        }
+    }
+
+    private static func quarantine(_ url: URL, reason: String) {
+        let corrupt = url.deletingLastPathComponent().appendingPathComponent("state.corrupt.json")
+        try? FileManager.default.removeItem(at: corrupt)
+        do {
+            try FileManager.default.moveItem(at: url, to: corrupt)
+            FileHandle.standardError.write(Data("Plume: state quarantined to \(corrupt.path) — \(reason)\n".utf8))
+        } catch {
+            FileHandle.standardError.write(Data("Plume: state quarantine failed: \(error)\n".utf8))
+        }
+    }
+}
+
 // MARK: - Tab model
 
 /// One open document inside a PlumeWindowController. JS owns the live buffer between
@@ -162,8 +251,132 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
+        // Default restoreWindowsOnLaunch to true on first ever launch.
+        if UserDefaults.standard.object(forKey: PlumeState.restoreOnLaunchKey) == nil {
+            UserDefaults.standard.set(true, forKey: PlumeState.restoreOnLaunchKey)
+        }
         setupMenu()
-        spawnInitialWindow()
+        let shouldRestore = UserDefaults.standard.bool(forKey: PlumeState.restoreOnLaunchKey)
+        if shouldRestore, let state = PlumeState.load(), !state.windows.isEmpty {
+            restore(state)
+        } else {
+            spawnInitialWindow()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Snapshot synchronously so unsaved drafts survive the quit.
+        saveStateNow()
+    }
+
+    /// Build a state snapshot from current in-memory windows + tabs. JS-side textareas
+    /// are snapshotted into each Tab's `content` first so the saved draft is fresh.
+    func snapshotState(completion: @escaping (PlumeState.File) -> Void) {
+        let group = DispatchGroup()
+        for controller in windows {
+            for tab in controller.tabs {
+                if tab.isDirty || tab.source == nil {
+                    group.enter()
+                    controller.webView.evaluateJavaScript(
+                        "window.creamyAPI.getTabContent('\(tab.id.uuidString)')"
+                    ) { result, _ in
+                        if let s = result as? String { tab.content = s }
+                        group.leave()
+                    }
+                }
+            }
+        }
+        let finalize: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            let windows: [PlumeState.Window] = self.windows.map { controller in
+                let frame = controller.window.map { NSStringFromRect($0.frame) } ?? ""
+                let activeIdx: Int = {
+                    if let id = controller.activeTabId,
+                       let i = controller.tabs.firstIndex(where: { $0.id == id }) { return i }
+                    return 0
+                }()
+                let tabs: [PlumeState.TabRecord] = controller.tabs.map { tab in
+                    var rec = PlumeState.TabRecord(
+                        id: tab.id.uuidString,
+                        kind: "untitled",
+                        url: nil, ssh: nil,
+                        contentDraft: nil,
+                        isDirty: tab.isDirty
+                    )
+                    switch tab.source {
+                    case .local(let url):
+                        rec.kind = "local"
+                        rec.url = url.absoluteString
+                    case .remote(let r):
+                        rec.kind = "remote"
+                        rec.ssh = PlumeState.SSH(user: r.user, host: r.host, path: r.path)
+                    case .none:
+                        rec.kind = "untitled"
+                    }
+                    // Persist contentDraft only for dirty tabs and untitled tabs
+                    // (clean tabs reload from disk/SSH at launch).
+                    if tab.isDirty || tab.source == nil {
+                        rec.contentDraft = tab.content
+                    }
+                    return rec
+                }
+                return PlumeState.Window(frame: frame, activeTabIndex: activeIdx, tabs: tabs)
+            }
+            completion(PlumeState.File(version: PlumeState.currentVersion, windows: windows))
+        }
+        // Wait briefly for JS, then save. Using main-queue notify keeps ordering.
+        group.notify(queue: .main, execute: finalize)
+    }
+
+    /// Persist state asynchronously after a dirty event (debounced).
+    private var saveDebounceWork: DispatchWorkItem?
+    func scheduleStateSave() {
+        saveDebounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.snapshotState { state in PlumeState.save(state) }
+        }
+        saveDebounceWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+    }
+
+    /// Synchronous save path for window close / applicationWillTerminate.
+    /// JS evaluateJavaScript is async, so we run a brief runloop to collect the
+    /// snapshots before writing.
+    func saveStateNow() {
+        let sema = DispatchSemaphore(value: 0)
+        var captured: PlumeState.File?
+        snapshotState { state in
+            captured = state
+            sema.signal()
+        }
+        // Pump the main run loop until snapshot completes or 1s elapses.
+        let deadline = Date().addingTimeInterval(1.0)
+        while captured == nil && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if let file = captured {
+            PlumeState.save(file)
+        }
+        _ = sema  // keep alive
+    }
+
+    /// Reconstruct windows + tabs from a saved state file.
+    func restore(_ state: PlumeState.File) {
+        for win in state.windows {
+            let controller = newWindowController()
+            // Apply frame if parseable.
+            if !win.frame.isEmpty {
+                let frame = NSRectFromString(win.frame)
+                if frame.size.width > 100 && frame.size.height > 100 {
+                    controller.window?.setFrame(frame, display: false)
+                }
+            }
+            controller.pendingRestoreTabs = win.tabs
+            controller.pendingRestoreActiveIndex = win.activeTabIndex
+            controller.shouldShowWelcomeIfNoPending = false
+            controller.startsWithEmptyUntitled = false
+            controller.showWindow(nil)
+        }
     }
 
     var appName: String {
@@ -540,6 +753,8 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     var pendingRemoteToOpen: SSHPath?
     var shouldShowWelcomeIfNoPending: Bool = false
     var startsWithEmptyUntitled: Bool = false
+    var pendingRestoreTabs: [PlumeState.TabRecord]?
+    var pendingRestoreActiveIndex: Int = 0
 
     private var browseController: BrowseWindowController?
     private var currentReadTask: SSHTask?
@@ -1159,6 +1374,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
     func windowWillClose(_ notification: Notification) {
         appDelegate.removeWindow(self)
+        appDelegate.scheduleStateSave()
     }
 
     func showError(_ message: String) {
@@ -1193,6 +1409,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
                     updateTitle()
                     refreshTabStrip()
                 }
+                appDelegate.scheduleStateSave()
             }
         case "ready":
             jsReady = true
@@ -1225,6 +1442,11 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     }
 
     private func handleJSReady() {
+        if let records = pendingRestoreTabs, !records.isEmpty {
+            pendingRestoreTabs = nil
+            restoreTabs(records, activeIndex: pendingRestoreActiveIndex)
+            return
+        }
         if let url = pendingFileToOpen {
             pendingFileToOpen = nil
             openLocalAsNewTab(url)
@@ -1250,6 +1472,77 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
             let tab = Tab(source: nil, content: "", isDirty: false)
             addTabAndActivate(tab)
         }
+    }
+
+    /// Recreate tabs from saved records. Dirty tabs and untitled tabs use the
+    /// persisted contentDraft; clean tabs reload from disk/SSH.
+    private func restoreTabs(_ records: [PlumeState.TabRecord], activeIndex: Int) {
+        for rec in records {
+            let id = UUID(uuidString: rec.id) ?? UUID()
+            switch rec.kind {
+            case "local":
+                if let urlStr = rec.url, let url = URL(string: urlStr) {
+                    if rec.isDirty, let draft = rec.contentDraft {
+                        let tab = Tab(id: id, source: .local(url), content: draft, isDirty: true)
+                        tabs.append(tab)
+                        let jsContent = encodeForJS(draft)
+                        webView.evaluateJavaScript(
+                            "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(url.path)))"
+                        )
+                    } else {
+                        // Clean — reload from disk.
+                        if let content = try? String(contentsOf: url, encoding: .utf8) {
+                            let tab = Tab(id: id, source: .local(url), content: content, isDirty: false)
+                            tabs.append(tab)
+                            let jsContent = encodeForJS(content)
+                            webView.evaluateJavaScript(
+                                "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(url.path)))"
+                            )
+                        }
+                    }
+                }
+            case "remote":
+                if let ssh = rec.ssh {
+                    let remote = SSHPath(user: ssh.user, host: ssh.host, path: ssh.path)
+                    if rec.isDirty, let draft = rec.contentDraft {
+                        let tab = Tab(id: id, source: .remote(remote), content: draft, isDirty: true)
+                        tabs.append(tab)
+                        let jsContent = encodeForJS(draft)
+                        webView.evaluateJavaScript(
+                            "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(encodeForJS(remote.display)))"
+                        )
+                    } else {
+                        // Clean — create placeholder tab and fire SSH read.
+                        let tab = Tab(id: id, source: .remote(remote), content: "", isDirty: false)
+                        tabs.append(tab)
+                        webView.evaluateJavaScript(
+                            "window.creamyAPI.openTab('\(tab.id.uuidString)', '', \(encodeForJS(remote.display)))"
+                        )
+                        beginRemoteRead(remote, into: tab)
+                    }
+                }
+            default:
+                // Untitled — only meaningful if we have a draft.
+                let draft = rec.contentDraft ?? ""
+                let tab = Tab(id: id, source: nil, content: draft, isDirty: rec.isDirty)
+                tabs.append(tab)
+                let jsContent = encodeForJS(draft)
+                webView.evaluateJavaScript(
+                    "window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), null)"
+                )
+            }
+        }
+        // If nothing restored (e.g. all local files vanished), open an empty Untitled.
+        if tabs.isEmpty {
+            let tab = Tab(source: nil, content: "", isDirty: false)
+            addTabAndActivate(tab)
+            return
+        }
+        let idx = max(0, min(activeIndex, tabs.count - 1))
+        activeTabId = tabs[idx].id
+        webView.evaluateJavaScript("window.creamyAPI.activateTab('\(tabs[idx].id.uuidString)')")
+        refreshTabStrip()
+        updateTitle()
     }
 
     func encodeForJS(_ str: String) -> String {
