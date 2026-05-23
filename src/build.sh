@@ -62,6 +62,8 @@ echo "→ bundling resources..."
 cp Info.plist "${CONTENTS}/Info.plist"
 cp index.html "${RES}/index.html"
 cp AppIcon.icns "${RES}/AppIcon.icns"
+# Vendored markdown renderer stack (v3.1+).
+cp -R preview "${RES}/preview"
 ditto "${SPARKLE_FRAMEWORK}" "${FRAMEWORKS}/Sparkle.framework"
 rm -f AppIcon.icns
 

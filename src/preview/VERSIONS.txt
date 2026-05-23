@@ -1,0 +1,30 @@
+Plume v3.1 vendored markdown renderer stack.
+All files fetched via curl from unpkg.com at the pinned versions below.
+Re-fetch reproducibly by curl -fsSL https://unpkg.com/<pkg>@<ver>/<path>.
+
+markdown-it             14.1.0   dist/markdown-it.min.js
+markdown-it-footnote     4.0.0   dist/markdown-it-footnote.min.js
+markdown-it-anchor       9.2.0   dist/markdownItAnchor.umd.js  (renamed → markdown-it-anchor.min.js)
+markdown-it-task-lists   2.1.1   dist/markdown-it-task-lists.min.js
+markdown-it-emoji        3.0.0   dist/markdown-it-emoji.min.js
+markdown-it-attrs        4.3.1   markdown-it-attrs.browser.js  (renamed → markdown-it-attrs.min.js)
+
+highlight.js            11.10.0  @highlightjs/cdn-assets/highlight.min.js  (full "common" pack)
+highlight.js themes     11.10.0  @highlightjs/cdn-assets/styles/github.min.css
+                                 @highlightjs/cdn-assets/styles/github-dark.min.css
+
+katex                   0.16.11  dist/katex.min.js
+                                 dist/katex.min.css          (post-processed: woff/ttf src entries
+                                                              stripped — woff2 only)
+                                 dist/contrib/auto-render.min.js
+                                 dist/fonts/*.woff2 (20 files, ~296 KB)
+
+github-markdown-css      5.6.1   github-markdown-light.css
+                                 github-markdown-dark.css
+                                 github-markdown.css         (combined, kept for reference; not loaded)
+
+Plume itself:           plume-preview.css   (hand-written; tunes GitHub baseline to Plume's tokens)
+
+KaTeX math glue:        no markdown-it-katex npm package shipped; we use KaTeX's stock
+                        auto-render extension (renderMathInElement) on the already-rendered HTML,
+                        which catches $inline$ and $$display$$ and \(…\), \[…\] forms.
