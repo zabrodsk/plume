@@ -89,10 +89,22 @@ bold "==> Generate Sparkle appcast"
 rm -rf "${SPARKLE_APPCAST_DIR}"
 mkdir -p "${SPARKLE_APPCAST_DIR}"
 cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
-cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<'NOTES'
-## Plume 2.7.2
+cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<NOTES
+## Plume ${VERSION}
 
-- Fixes scrolled text bleeding behind the title bar and find bar.
+The biggest update since Plume first shipped.
+
+### What's new
+
+- **Tabs** — \`⌘T\` opens a new tab; \`⌘1\`–\`⌘9\` jump to it; \`⇧⌘]\` / \`⇧⌘[\` cycle. Each tab keeps its own undo, scroll, and selection.
+- **Multi-window** — \`⌘N\` opens a new window. Tabs in window A stay independent of window B. (Heads up: \`⌘N\` used to be New Document — that's \`⌘T\` now.)
+- **Preview** — \`⌘E\` toggles rendered Markdown. Headings, bold, lists, links, fenced code with syntax highlighting, tables, blockquotes, footnotes, task lists, and LaTeX math. Per tab.
+- **Persistence** — open windows, tabs, and unsaved drafts come back on relaunch. Opt out: \`defaults write com.zabrodsk.Plume plume.restoreWindowsOnLaunch -bool false\`.
+
+### Notes
+
+- Binary is now ~950 KB universal (was ~200 KB in v2). The brand line shifts to "under 1 MB binary"; the bundle gains ~1 MB for the vendored markdown renderer (markdown-it, highlight.js, KaTeX). Worth it for a writing tool with a polished preview.
+- macOS 26 (Tahoe) chrome geometry is measured dynamically — the tab strip self-corrects on any macOS.
 NOTES
 "${SPARKLE_CACHE}/bin/generate_appcast" \
   --download-url-prefix "https://github.com/zabrodsk/plume/releases/download/v${VERSION}/" \
