@@ -46,8 +46,12 @@
   }
 
   .editor {
-    position: absolute; inset: 0;
-    padding: 64px max(96px, 12vw) 48px;
+    /* The scroll container starts BELOW the title bar (and below the find bar
+       when open). Using `top` instead of `padding-top` prevents scrolled text
+       from rendering into the safe zone, which is visible behind the transparent
+       NSWindow title bar (fullSizeContentView) and in the gap below the find bar. */
+    position: absolute; top: 64px; right: 0; bottom: 0; left: 0;
+    padding: 0 max(96px, 12vw) 48px;
     overflow-y: auto; overflow-x: hidden;
     cursor: text;
     /* Hint to the browser: scroll position changes; the layer can be cached. */
@@ -83,7 +87,7 @@
 
   .input-layer {
     position: absolute;
-    top: 64px;
+    top: 0;
     left: max(96px, 12vw);
     width: calc(100% - 2 * max(96px, 12vw));
     color: transparent;
@@ -108,7 +112,7 @@
 
   .hint {
     position: absolute;
-    top: 64px;
+    top: 0;
     left: max(96px, 12vw);
     color: var(--ghost);
     font-size: 17px;
@@ -135,9 +139,7 @@
   }
   #findbar.visible { display: flex; }
 
-  body.has-find .editor { padding-top: 104px; }
-  body.has-find .input-layer { top: 104px; }
-  body.has-find .hint { top: 104px; }
+  body.has-find .editor { top: 104px; }
 
   #findinput {
     flex: 1;

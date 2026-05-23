@@ -3,16 +3,16 @@
     <channel>
         <title>Plume</title>
         <item>
-            <title>2.7.1</title>
-            <pubDate>Fri, 15 May 2026 18:37:47 +0200</pubDate>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
+            <title>2.7.2</title>
+            <pubDate>Sat, 23 May 2026 20:54:47 +0200</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>2.7.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## Plume 2.7.1
+            <description sparkle:format="markdown"><![CDATA[## Plume 2.7.2
 
-- Fixes find bar (⌘F) overlapping the window title bar.
+- Fixes scrolled text bleeding behind the title bar and find bar.
 ]]></description>
-            <enclosure url="https://github.com/zabrodsk/plume/releases/download/v2.7.1/Plume.dmg" length="1909186" type="application/octet-stream" sparkle:edSignature="WfPO4RQPlZp20RZPvpFjnhdy3a9F6grwuoICVyZqEreO3COlmbSeBuTkD7Fj3/I96cb9j8tGstmrxDc0TsucAg=="/>
+            <enclosure url="https://github.com/zabrodsk/plume/releases/download/v2.7.2/Plume.dmg" length="1909317" type="application/octet-stream" sparkle:edSignature="sR2RW/RUuPm2g2ElAWdPk1tXqQ9SrVs+guUInmSpeWLU11TmZln6Z0PcIUlAPGjRjc+p8HoQEL2KsGTgk0BsBw=="/>
         </item>
     </channel>
 </rss>

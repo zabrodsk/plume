@@ -90,9 +90,9 @@ rm -rf "${SPARKLE_APPCAST_DIR}"
 mkdir -p "${SPARKLE_APPCAST_DIR}"
 cp "${DMG_PATH}" "${SPARKLE_APPCAST_DIR}/"
 cat > "${SPARKLE_APPCAST_DIR}/${APP_NAME}.md" <<'NOTES'
-## Plume 2.7.1
+## Plume 2.7.2
 
-- Fixes find bar (⌘F) overlapping the window title bar.
+- Fixes scrolled text bleeding behind the title bar and find bar.
 NOTES
 "${SPARKLE_CACHE}/bin/generate_appcast" \
   --download-url-prefix "https://github.com/zabrodsk/plume/releases/download/v${VERSION}/" \
