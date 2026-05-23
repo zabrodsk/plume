@@ -90,28 +90,39 @@ private extension NSButton {
     }
 }
 
+// MARK: - Tab model
+
+/// One open document inside a PlumeWindowController. JS owns the live buffer between
+/// snapshots; `content` is refreshed at save / switch / close / persistence checkpoints.
+final class Tab {
+    let id: UUID
+    var source: FileSource?
+    var content: String
+    var isDirty: Bool
+
+    init(id: UUID = UUID(), source: FileSource? = nil, content: String = "", isDirty: Bool = false) {
+        self.id = id
+        self.source = source
+        self.content = content
+        self.isDirty = isDirty
+    }
+
+    var title: String { source?.displayName ?? "Untitled" }
+}
+
 // MARK: - App delegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, NSWindowDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    var window: NSWindow!
-    var webView: WKWebView!
-    var currentFile: FileSource?
-    var isDirty: Bool = false
+    var windows: [PlumeWindowController] = []
     var pendingFileToOpen: URL?
     var pendingRemoteToOpen: SSHPath?
-    var jsReady: Bool = false
-    var browseController: BrowseWindowController?
     var updaterController: SPUStandardUpdaterController!
-
-    private var currentReadTask: SSHTask?
-    private var progressOverlay: ProgressOverlay?
-    private var escMonitor: Any?
 
     // Version-keyed so future releases can independently decide whether to show a new welcome.
     private static let firstLaunchKey = "plume.firstLaunchSeen.2.5.0"
 
-    private static let welcomeDocument = """
+    static let welcomeDocument = """
 # Welcome to Plume.
 
 Plume is a markdown editor for the satisfaction of typing. Every
@@ -152,62 +163,85 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
             userDriverDelegate: nil
         )
         setupMenu()
-        setupWindow()
+        spawnInitialWindow()
+    }
+
+    var appName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Plume"
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let url = URL(fileURLWithPath: filename)
-        if jsReady { loadLocal(url) } else { pendingFileToOpen = url }
+        if let controller = activeWindowController() {
+            controller.loadLocalWhenReady(url)
+        } else {
+            pendingFileToOpen = url
+            spawnInitialWindow()
+        }
         return true
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if url.scheme == "plume-ssh" {
+                let path = url.path
+                let host: String = {
+                    if let user = url.user, let h = url.host { return "\(user)@\(h)" }
+                    return url.host ?? ""
+                }()
+                guard !host.isEmpty else { continue }
+                let remote = SSHPath(user: nil, host: host, path: path)
+                if let controller = activeWindowController() {
+                    controller.loadRemoteWhenReady(remote)
+                } else {
+                    pendingRemoteToOpen = remote
+                    spawnInitialWindow()
+                }
+            } else if url.isFileURL {
+                if let controller = activeWindowController() {
+                    controller.loadLocalWhenReady(url)
+                } else {
+                    pendingFileToOpen = url
+                    spawnInitialWindow()
+                }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func setupWindow() {
-        let frame = NSRect(x: 0, y: 0, width: 880, height: 720)
-        let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-        window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .visible
-        window.center()
-        window.delegate = self
-        let bgColor = NSColor(name: nil) { appearance in
-            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-                return NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
-            } else {
-                return NSColor(red: 0.992, green: 0.980, blue: 0.949, alpha: 1.0)
-            }
+    func spawnInitialWindow() {
+        let controller = newWindowController()
+        controller.showWindow(nil)
+        controller.pendingFileToOpen = pendingFileToOpen
+        controller.pendingRemoteToOpen = pendingRemoteToOpen
+        controller.shouldShowWelcomeIfNoPending = true
+        pendingFileToOpen = nil
+        pendingRemoteToOpen = nil
+    }
+
+    func newWindowController() -> PlumeWindowController {
+        let controller = PlumeWindowController(appDelegate: self)
+        windows.append(controller)
+        return controller
+    }
+
+    func removeWindow(_ controller: PlumeWindowController) {
+        windows.removeAll { $0 === controller }
+    }
+
+    /// Window that is key, or the first window if none is key (e.g. just after launch).
+    func activeWindowController() -> PlumeWindowController? {
+        if let key = NSApp.keyWindow, let controller = windows.first(where: { $0.window === key }) {
+            return controller
         }
-        window.backgroundColor = bgColor
-        window.minSize = NSSize(width: 480, height: 360)
-        window.isReleasedWhenClosed = false
+        return windows.first
+    }
 
-        let config = WKWebViewConfiguration()
-        let ucc = WKUserContentController()
-        ucc.add(self, name: "dirty")
-        ucc.add(self, name: "ready")
-        ucc.add(self, name: "openURL")
-        config.userContentController = ucc
-
-        let prefs = WKPreferences()
-        prefs.setValue(true, forKey: "developerExtrasEnabled")
-        config.preferences = prefs
-
-        webView = WKWebView(frame: frame, configuration: config)
-        webView.autoresizingMask = [.width, .height]
-        webView.setValue(false, forKey: "drawsBackground")
-        if #available(macOS 12.0, *) {
-            webView.underPageBackgroundColor = bgColor
-        }
-
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        }
-
-        window.contentView = webView
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        updateTitle()
+    func shouldShowWelcomeAndConsume() -> Bool {
+        if UserDefaults.standard.bool(forKey: AppDelegate.firstLaunchKey) { return false }
+        UserDefaults.standard.set(true, forKey: AppDelegate.firstLaunchKey)
+        return true
     }
 
     func setupMenu() {
@@ -246,11 +280,18 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(NSMenuItem(title: "New", action: #selector(newFile), keyEquivalent: "n"))
-        fileMenu.addItem(NSMenuItem(title: "Open\u{2026}", action: #selector(openFile), keyEquivalent: "o"))
+        // Window-scoped: dispatch via responder chain (target = nil).
+        let newItem = NSMenuItem(title: "New", action: #selector(PlumeWindowController.newFile), keyEquivalent: "n")
+        newItem.target = nil
+        fileMenu.addItem(newItem)
 
-        let openSSH = NSMenuItem(title: "Open via SSH\u{2026}", action: #selector(openRemote), keyEquivalent: "o")
+        let openItem = NSMenuItem(title: "Open\u{2026}", action: #selector(PlumeWindowController.openFile), keyEquivalent: "o")
+        openItem.target = nil
+        fileMenu.addItem(openItem)
+
+        let openSSH = NSMenuItem(title: "Open via SSH\u{2026}", action: #selector(PlumeWindowController.openRemote), keyEquivalent: "o")
         openSSH.keyEquivalentModifierMask = [.command, .option]
+        openSSH.target = nil
         fileMenu.addItem(openSSH)
 
         let openRecent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
@@ -260,11 +301,18 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         fileMenu.addItem(openRecent)
 
         fileMenu.addItem(.separator())
-        fileMenu.addItem(NSMenuItem(title: "Save", action: #selector(saveFile), keyEquivalent: "s"))
-        let saveAs = NSMenuItem(title: "Save As\u{2026}", action: #selector(saveFileAs), keyEquivalent: "S")
+
+        let saveItem = NSMenuItem(title: "Save", action: #selector(PlumeWindowController.saveFile), keyEquivalent: "s")
+        saveItem.target = nil
+        fileMenu.addItem(saveItem)
+
+        let saveAs = NSMenuItem(title: "Save As\u{2026}", action: #selector(PlumeWindowController.saveFileAs), keyEquivalent: "S")
         saveAs.keyEquivalentModifierMask = [.command, .shift]
+        saveAs.target = nil
         fileMenu.addItem(saveAs)
+
         fileMenu.addItem(.separator())
+        // performClose travels the responder chain naturally; no target needed.
         fileMenu.addItem(NSMenuItem(title: "Close",
                                     action: #selector(NSWindow.performClose(_:)),
                                     keyEquivalent: "w"))
@@ -285,7 +333,9 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
                                     action: #selector(NSText.selectAll(_:)),
                                     keyEquivalent: "a"))
         editMenu.addItem(.separator())
-        editMenu.addItem(NSMenuItem(title: "Find\u{2026}", action: #selector(performFind), keyEquivalent: "f"))
+        let findItem = NSMenuItem(title: "Find\u{2026}", action: #selector(PlumeWindowController.performFind), keyEquivalent: "f")
+        findItem.target = nil
+        editMenu.addItem(findItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -314,9 +364,10 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         let helpMenuItem = NSMenuItem()
         let helpMenu = NSMenu(title: "Help")
         let cheatsheetItem = NSMenuItem(title: "Plume Cheatsheet",
-                                        action: #selector(showCheatsheet),
+                                        action: #selector(PlumeWindowController.showCheatsheet),
                                         keyEquivalent: "?")
         cheatsheetItem.keyEquivalentModifierMask = [.command, .shift]
+        cheatsheetItem.target = nil
         helpMenu.addItem(cheatsheetItem)
         helpMenuItem.submenu = helpMenu
         mainMenu.addItem(helpMenuItem)
@@ -324,444 +375,11 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
         NSApp.mainMenu = mainMenu
     }
+}
 
-    var appName: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Plume"
-    }
+// MARK: - NSMenuDelegate (Open Recent)
 
-    @objc func performFind() {
-        webView.evaluateJavaScript("window.find_open && window.find_open()")
-    }
-
-    @objc func showCheatsheet() {
-        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
-    }
-
-    @objc func newFile() {
-        guardDirty { [weak self] in
-            guard let self = self else { return }
-            self.currentFile = nil
-            self.webView.evaluateJavaScript("window.creamyAPI.setContent('', null)")
-            self.isDirty = false
-            self.updateTitle()
-        }
-    }
-
-    @objc func openFile() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        if let mdType = UTType(filenameExtension: "md") {
-            panel.allowedContentTypes = [mdType, .plainText]
-        }
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self = self, response == .OK, let url = panel.url else { return }
-            self.guardDirty { self.loadLocal(url) }
-        }
-    }
-
-    @objc func openRemote() {
-        guardDirty { [weak self] in
-            guard let self = self else { return }
-            let alert = NSAlert()
-            alert.messageText = "Open via SSH"
-            alert.informativeText = "Pick a host to browse, or type a full [user@]host:path to open directly."
-            alert.addButton(withTitle: "Open")
-            alert.addButton(withTitle: "Cancel")
-
-            let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-            combo.placeholderString = "user@host  or  user@host:/path/to/file.md"
-            combo.completes = true
-            combo.usesDataSource = false
-            combo.addItems(withObjectValues: SSHConfig.hostAliases())
-
-            let key = "plume.sshDialogSeen"
-            let firstTime = !UserDefaults.standard.bool(forKey: key)
-
-            let hint: NSTextField? = firstTime ? {
-                let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
-                label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
-                label.textColor = NSColor.secondaryLabelColor
-                label.maximumNumberOfLines = 2
-                label.lineBreakMode = .byWordWrapping
-                return label
-            }() : nil
-
-            let accessoryView: NSView
-            if let hint = hint {
-                let stack = NSStackView(views: [combo, hint])
-                stack.orientation = .vertical
-                stack.alignment = .leading
-                stack.spacing = 6
-                stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
-                accessoryView = stack
-            } else {
-                accessoryView = combo
-            }
-            alert.accessoryView = accessoryView
-            alert.window.initialFirstResponder = combo
-
-            if firstTime {
-                UserDefaults.standard.set(true, forKey: key)
-            }
-
-            alert.beginSheetModal(for: self.window) { response in
-                guard response == .alertFirstButtonReturn else { return }
-                let raw = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !raw.isEmpty else { return }
-
-                if raw.contains(":") {
-                    // Full [user@]host:path — existing fast-path.
-                    guard let remote = SSHPath.parse(raw) else {
-                        self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
-                        return
-                    }
-                    self.loadRemote(remote)
-                } else {
-                    // Host alias — open browse window.
-                    let host = raw
-                    let lastPath = UserDefaults.standard.string(forKey: "plume.lastDir.\(host)") ?? "."
-                    self.browseController = BrowseWindowController(host: host, initialPath: lastPath) { [weak self] picked in
-                        self?.loadRemote(picked)
-                        self?.browseController = nil
-                    }
-                    self.browseController?.showWindow(nil)
-                }
-            }
-        }
-    }
-
-    func loadLocal(_ url: URL) {
-        do {
-            let content = try String(contentsOf: url, encoding: .utf8)
-            currentFile = .local(url)
-            isDirty = false
-            sendContentToEditor(content, displayPath: url.path)
-            updateTitle()
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-        } catch {
-            showError("Could not read file: \(error.localizedDescription)")
-        }
-    }
-
-    func loadRemote(_ remote: SSHPath) {
-        window.title = "Loading \(remote.display)…"
-
-        // Install an Esc key monitor while the read is in flight.
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, self.currentReadTask != nil else { return event }
-            if event.keyCode == 53 {  // Esc
-                self.currentReadTask?.cancel()
-                return nil
-            }
-            return event
-        }
-
-        let task = SSHIO.read(remote) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.dismissReadProgress()
-                switch result {
-                case .success(let content):
-                    self.currentFile = .remote(remote)
-                    self.isDirty = false
-                    self.sendContentToEditor(content, displayPath: remote.display)
-                    self.updateTitle()
-                    if let url = self.recentURL(for: remote) {
-                        NSDocumentController.shared.noteNewRecentDocumentURL(url)
-                    }
-                case .failure(let err):
-                    self.updateTitle()
-                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError { return }
-                    self.showSSHError(err, host: remote.host, path: remote.path)
-                }
-            }
-        }
-        currentReadTask = task
-
-        // Show the overlay after 250 ms — skip it entirely if the read is already done.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self = self, self.currentReadTask != nil,
-                  let contentView = self.window.contentView else { return }
-            let pathDisplay = (remote.path as NSString).lastPathComponent.isEmpty
-                ? remote.path
-                : (remote.path as NSString).lastPathComponent
-            let msg = "Loading \(remote.host):\(pathDisplay)…"
-            self.progressOverlay = ProgressOverlay(
-                parent: contentView,
-                message: msg,
-                onCancel: { [weak self] in self?.currentReadTask?.cancel() }
-            )
-        }
-    }
-
-    private func dismissReadProgress() {
-        progressOverlay?.dismiss()
-        progressOverlay = nil
-        currentReadTask = nil
-        if let monitor = escMonitor {
-            NSEvent.removeMonitor(monitor)
-            escMonitor = nil
-        }
-    }
-
-    /// Synthesise a plume-ssh:// URL for Open Recent. We use a custom scheme so
-    /// NSDocumentController can track remote files the same way it tracks local ones.
-    private func recentURL(for remote: SSHPath) -> URL? {
-        var components = URLComponents()
-        components.scheme = "plume-ssh"
-        // remote.host may be "user@server" (browse flow) or bare "server" (direct path flow).
-        // URLComponents.host rejects embedded "@", so split user out explicitly.
-        if let user = remote.user {
-            components.user = user
-            components.host = remote.host
-        } else if let at = remote.host.firstIndex(of: "@") {
-            components.user = String(remote.host[..<at])
-            components.host = String(remote.host[remote.host.index(after: at)...])
-        } else {
-            components.host = remote.host
-        }
-        components.path = remote.path.hasPrefix("/") ? remote.path : "/" + remote.path
-        return components.url
-    }
-
-    @objc func saveFile() {
-        switch currentFile {
-        case .some(let source):
-            saveTo(source)
-        case .none:
-            saveFileAs()
-        }
-    }
-
-    @objc func saveFileAs() {
-        let panel = NSSavePanel()
-        if let mdType = UTType(filenameExtension: "md") { panel.allowedContentTypes = [mdType] }
-        panel.nameFieldStringValue = currentFile?.displayName ?? "Untitled.md"
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self = self, response == .OK, let url = panel.url else { return }
-            self.saveTo(.local(url))
-        }
-    }
-
-    func saveTo(_ source: FileSource) {
-        webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
-            guard let self = self else { return }
-            guard let content = result as? String else {
-                self.showError("Could not read editor content."); return
-            }
-            switch source {
-            case .local(let url):
-                do {
-                    try content.write(to: url, atomically: true, encoding: .utf8)
-                    self.currentFile = .local(url)
-                    self.isDirty = false
-                    self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
-                    self.updateTitle()
-                } catch {
-                    self.showError("Could not save: \(error.localizedDescription)")
-                }
-            case .remote(let remote):
-                SSHIO.write(content, to: remote) { writeResult in
-                    DispatchQueue.main.async {
-                        switch writeResult {
-                        case .success:
-                            self.currentFile = .remote(remote)
-                            self.isDirty = false
-                            self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
-                            self.updateTitle()
-                        case .failure(let err):
-                            self.showSSHError(err, host: remote.host, path: remote.path)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    func guardDirty(_ proceed: @escaping () -> Void) {
-        if !isDirty { proceed(); return }
-        let alert = NSAlert()
-        alert.messageText = "You have unsaved changes."
-        alert.informativeText = "Do you want to save before continuing?"
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self = self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                self.saveThenContinue(proceed)
-            case .alertSecondButtonReturn:
-                proceed()
-            default:
-                break
-            }
-        }
-    }
-
-    private func saveThenContinue(_ proceed: @escaping () -> Void) {
-        if let source = currentFile {
-            // We have a destination — save and chain.
-            webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
-                guard let self = self, let content = result as? String else { return }
-                switch source {
-                case .local(let url):
-                    do {
-                        try content.write(to: url, atomically: true, encoding: .utf8)
-                        self.isDirty = false
-                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
-                        self.updateTitle()
-                        proceed()
-                    } catch {
-                        self.showError("Could not save: \(error.localizedDescription)")
-                    }
-                case .remote(let remote):
-                    SSHIO.write(content, to: remote) { writeResult in
-                        DispatchQueue.main.async {
-                            switch writeResult {
-                            case .success:
-                                self.isDirty = false
-                                self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
-                                self.updateTitle()
-                                proceed()
-                            case .failure(let err):
-                                self.showSSHError(err, host: remote.host, path: remote.path)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            // No destination — prompt for one (always local; SSH save-as is v3).
-            let panel = NSSavePanel()
-            if let mdType = UTType(filenameExtension: "md") { panel.allowedContentTypes = [mdType] }
-            panel.nameFieldStringValue = "Untitled.md"
-            panel.beginSheetModal(for: window) { [weak self] resp in
-                guard let self = self, resp == .OK, let url = panel.url else { return }
-                self.webView.evaluateJavaScript("window.creamyAPI.getContent()") { result, _ in
-                    guard let content = result as? String else { return }
-                    do {
-                        try content.write(to: url, atomically: true, encoding: .utf8)
-                        self.currentFile = .local(url)
-                        self.isDirty = false
-                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
-                        self.updateTitle()
-                        proceed()
-                    } catch {
-                        self.showError("Could not save: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
-    }
-
-    func updateTitle() {
-        switch currentFile {
-        case .local(let url):
-            window.title = url.lastPathComponent
-            window.representedURL = url
-        case .remote(let remote):
-            window.title = "ssh: \(remote.display)"
-            window.representedURL = nil
-        case .none:
-            window.title = "Untitled"
-            window.representedURL = nil
-        }
-        window.isDocumentEdited = isDirty
-    }
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if !isDirty { return true }
-        guardDirty { [weak self] in self?.window.close() }
-        return false
-    }
-
-    func showError(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Error"
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.beginSheetModal(for: window, completionHandler: nil)
-    }
-
-    private func showSSHError(_ error: Error, host: String, path: String?) {
-        let info = SSHIO.describe(error: error, host: host, path: path)
-        let alert = NSAlert()
-        alert.messageText = info.title
-        alert.informativeText = info.body
-        alert.addButton(withTitle: "OK")
-        alert.beginSheetModal(for: window, completionHandler: nil)
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            if url.scheme == "plume-ssh" {
-                let path = url.path
-                let host: String = {
-                    if let user = url.user, let h = url.host { return "\(user)@\(h)" }
-                    return url.host ?? ""
-                }()
-                guard !host.isEmpty else { continue }
-                let remote = SSHPath(user: nil, host: host, path: path)
-                if jsReady { loadRemote(remote) } else { pendingRemoteToOpen = remote }
-            } else if url.isFileURL {
-                if jsReady { loadLocal(url) } else { pendingFileToOpen = url }
-            }
-        }
-    }
-
-    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
-        switch message.name {
-        case "dirty":
-            isDirty = true
-            updateTitle()
-        case "ready":
-            jsReady = true
-            if let url = pendingFileToOpen {
-                pendingFileToOpen = nil
-                loadLocal(url)
-            } else if let remote = pendingRemoteToOpen {
-                pendingRemoteToOpen = nil
-                loadRemote(remote)
-            } else {
-                showWelcomeIfFirstLaunch()
-            }
-        case "openURL":
-            if let s = message.body as? String, let url = URL(string: s) {
-                NSWorkspace.shared.open(url)
-            }
-        default:
-            break
-        }
-    }
-
-    private func showWelcomeIfFirstLaunch() {
-        if UserDefaults.standard.bool(forKey: AppDelegate.firstLaunchKey) { return }
-        UserDefaults.standard.set(true, forKey: AppDelegate.firstLaunchKey)
-        // currentFile stays nil — saving will prompt via Save As.
-        // isDirty = true so ⌘W triggers the unsaved-changes prompt.
-        sendContentToEditor(AppDelegate.welcomeDocument, displayPath: nil)
-        isDirty = true
-        updateTitle()
-    }
-
-    private func sendContentToEditor(_ content: String, displayPath: String?) {
-        let jsText = encodeForJS(content)
-        let jsPath = displayPath.map { encodeForJS($0) } ?? "null"
-        webView.evaluateJavaScript("window.creamyAPI.setContent(\(jsText), \(jsPath))")
-    }
-
-    func encodeForJS(_ str: String) -> String {
-        let data = try! JSONSerialization.data(withJSONObject: [str], options: [])
-        var json = String(data: data, encoding: .utf8) ?? "[\"\"]"
-        json.removeFirst(); json.removeLast()
-        return json
-    }
-
-    // MARK: - NSMenuDelegate (Open Recent)
-
+extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu.title == "Open Recent" else { return }
         menu.removeAllItems()
@@ -808,6 +426,517 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
     @objc func clearRecents() {
         NSDocumentController.shared.clearRecentDocuments(nil)
+    }
+}
+
+// MARK: - Plume window controller
+
+final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScriptMessageHandler {
+
+    private unowned let appDelegate: AppDelegate
+
+    var webView: WKWebView!
+
+    // Single-tab semantics for Phase A. Phase C introduces the array + activeTabId.
+    var currentFile: FileSource?
+    var isDirty: Bool = false
+    var jsReady: Bool = false
+
+    var pendingFileToOpen: URL?
+    var pendingRemoteToOpen: SSHPath?
+    var shouldShowWelcomeIfNoPending: Bool = false
+
+    private var browseController: BrowseWindowController?
+    private var currentReadTask: SSHTask?
+    private var progressOverlay: ProgressOverlay?
+    private var escMonitor: Any?
+
+    init(appDelegate: AppDelegate) {
+        self.appDelegate = appDelegate
+
+        let frame = NSRect(x: 0, y: 0, width: 880, height: 720)
+        let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        let window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .visible
+        window.center()
+        let bgColor = NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return NSColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
+            } else {
+                return NSColor(red: 0.992, green: 0.980, blue: 0.949, alpha: 1.0)
+            }
+        }
+        window.backgroundColor = bgColor
+        window.minSize = NSSize(width: 480, height: 360)
+        window.isReleasedWhenClosed = false
+
+        super.init(window: window)
+
+        window.delegate = self
+
+        let config = WKWebViewConfiguration()
+        let ucc = WKUserContentController()
+        ucc.add(self, name: "dirty")
+        ucc.add(self, name: "ready")
+        ucc.add(self, name: "openURL")
+        config.userContentController = ucc
+
+        let prefs = WKPreferences()
+        prefs.setValue(true, forKey: "developerExtrasEnabled")
+        config.preferences = prefs
+
+        webView = WKWebView(frame: frame, configuration: config)
+        webView.autoresizingMask = [.width, .height]
+        webView.setValue(false, forKey: "drawsBackground")
+        if #available(macOS 12.0, *) {
+            webView.underPageBackgroundColor = bgColor
+        }
+
+        if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+
+        window.contentView = webView
+        updateTitle()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        window?.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: Public load-when-ready entry points
+
+    func loadLocalWhenReady(_ url: URL) {
+        if jsReady { loadLocal(url) } else { pendingFileToOpen = url }
+    }
+
+    func loadRemoteWhenReady(_ remote: SSHPath) {
+        if jsReady { loadRemote(remote) } else { pendingRemoteToOpen = remote }
+    }
+
+    // MARK: Menu actions (responder-chain, target = nil)
+
+    @objc func performFind() {
+        webView.evaluateJavaScript("window.find_open && window.find_open()")
+    }
+
+    @objc func showCheatsheet() {
+        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
+    }
+
+    @objc func newFile() {
+        guardDirty { [weak self] in
+            guard let self = self else { return }
+            self.currentFile = nil
+            self.webView.evaluateJavaScript("window.creamyAPI.setContent('', null)")
+            self.isDirty = false
+            self.updateTitle()
+        }
+    }
+
+    @objc func openFile() {
+        guard let window = window else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if let mdType = UTType(filenameExtension: "md") {
+            panel.allowedContentTypes = [mdType, .plainText]
+        }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            self.guardDirty { self.loadLocal(url) }
+        }
+    }
+
+    @objc func openRemote() {
+        guard let window = window else { return }
+        guardDirty { [weak self] in
+            guard let self = self else { return }
+            let alert = NSAlert()
+            alert.messageText = "Open via SSH"
+            alert.informativeText = "Pick a host to browse, or type a full [user@]host:path to open directly."
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+
+            let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            combo.placeholderString = "user@host  or  user@host:/path/to/file.md"
+            combo.completes = true
+            combo.usesDataSource = false
+            combo.addItems(withObjectValues: SSHConfig.hostAliases())
+
+            let key = "plume.sshDialogSeen"
+            let firstTime = !UserDefaults.standard.bool(forKey: key)
+
+            let hint: NSTextField? = firstTime ? {
+                let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
+                label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
+                label.textColor = NSColor.secondaryLabelColor
+                label.maximumNumberOfLines = 2
+                label.lineBreakMode = .byWordWrapping
+                return label
+            }() : nil
+
+            let accessoryView: NSView
+            if let hint = hint {
+                let stack = NSStackView(views: [combo, hint])
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 6
+                stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
+                accessoryView = stack
+            } else {
+                accessoryView = combo
+            }
+            alert.accessoryView = accessoryView
+            alert.window.initialFirstResponder = combo
+
+            if firstTime {
+                UserDefaults.standard.set(true, forKey: key)
+            }
+
+            alert.beginSheetModal(for: window) { response in
+                guard response == .alertFirstButtonReturn else { return }
+                let raw = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !raw.isEmpty else { return }
+
+                if raw.contains(":") {
+                    // Full [user@]host:path — existing fast-path.
+                    guard let remote = SSHPath.parse(raw) else {
+                        self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
+                        return
+                    }
+                    self.loadRemote(remote)
+                } else {
+                    // Host alias — open browse window.
+                    let host = raw
+                    let lastPath = UserDefaults.standard.string(forKey: "plume.lastDir.\(host)") ?? "."
+                    self.browseController = BrowseWindowController(host: host, initialPath: lastPath) { [weak self] picked in
+                        self?.loadRemote(picked)
+                        self?.browseController = nil
+                    }
+                    self.browseController?.showWindow(nil)
+                }
+            }
+        }
+    }
+
+    func loadLocal(_ url: URL) {
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            currentFile = .local(url)
+            isDirty = false
+            sendContentToEditor(content, displayPath: url.path)
+            updateTitle()
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        } catch {
+            showError("Could not read file: \(error.localizedDescription)")
+        }
+    }
+
+    func loadRemote(_ remote: SSHPath) {
+        guard let window = window else { return }
+        window.title = "Loading \(remote.display)…"
+
+        // Install an Esc key monitor while the read is in flight.
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.currentReadTask != nil else { return event }
+            if event.keyCode == 53 {  // Esc
+                self.currentReadTask?.cancel()
+                return nil
+            }
+            return event
+        }
+
+        let task = SSHIO.read(remote) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.dismissReadProgress()
+                switch result {
+                case .success(let content):
+                    self.currentFile = .remote(remote)
+                    self.isDirty = false
+                    self.sendContentToEditor(content, displayPath: remote.display)
+                    self.updateTitle()
+                    if let url = self.recentURL(for: remote) {
+                        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                    }
+                case .failure(let err):
+                    self.updateTitle()
+                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError { return }
+                    self.showSSHError(err, host: remote.host, path: remote.path)
+                }
+            }
+        }
+        currentReadTask = task
+
+        // Show the overlay after 250 ms — skip it entirely if the read is already done.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self, self.currentReadTask != nil,
+                  let contentView = self.window?.contentView else { return }
+            let pathDisplay = (remote.path as NSString).lastPathComponent.isEmpty
+                ? remote.path
+                : (remote.path as NSString).lastPathComponent
+            let msg = "Loading \(remote.host):\(pathDisplay)…"
+            self.progressOverlay = ProgressOverlay(
+                parent: contentView,
+                message: msg,
+                onCancel: { [weak self] in self?.currentReadTask?.cancel() }
+            )
+        }
+    }
+
+    private func dismissReadProgress() {
+        progressOverlay?.dismiss()
+        progressOverlay = nil
+        currentReadTask = nil
+        if let monitor = escMonitor {
+            NSEvent.removeMonitor(monitor)
+            escMonitor = nil
+        }
+    }
+
+    /// Synthesise a plume-ssh:// URL for Open Recent. We use a custom scheme so
+    /// NSDocumentController can track remote files the same way it tracks local ones.
+    private func recentURL(for remote: SSHPath) -> URL? {
+        var components = URLComponents()
+        components.scheme = "plume-ssh"
+        if let user = remote.user {
+            components.user = user
+            components.host = remote.host
+        } else if let at = remote.host.firstIndex(of: "@") {
+            components.user = String(remote.host[..<at])
+            components.host = String(remote.host[remote.host.index(after: at)...])
+        } else {
+            components.host = remote.host
+        }
+        components.path = remote.path.hasPrefix("/") ? remote.path : "/" + remote.path
+        return components.url
+    }
+
+    @objc func saveFile() {
+        switch currentFile {
+        case .some(let source):
+            saveTo(source)
+        case .none:
+            saveFileAs()
+        }
+    }
+
+    @objc func saveFileAs() {
+        guard let window = window else { return }
+        let panel = NSSavePanel()
+        if let mdType = UTType(filenameExtension: "md") { panel.allowedContentTypes = [mdType] }
+        panel.nameFieldStringValue = currentFile?.displayName ?? "Untitled.md"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            self.saveTo(.local(url))
+        }
+    }
+
+    func saveTo(_ source: FileSource) {
+        webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
+            guard let self = self else { return }
+            guard let content = result as? String else {
+                self.showError("Could not read editor content."); return
+            }
+            switch source {
+            case .local(let url):
+                do {
+                    try content.write(to: url, atomically: true, encoding: .utf8)
+                    self.currentFile = .local(url)
+                    self.isDirty = false
+                    self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                    self.updateTitle()
+                } catch {
+                    self.showError("Could not save: \(error.localizedDescription)")
+                }
+            case .remote(let remote):
+                SSHIO.write(content, to: remote) { writeResult in
+                    DispatchQueue.main.async {
+                        switch writeResult {
+                        case .success:
+                            self.currentFile = .remote(remote)
+                            self.isDirty = false
+                            self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                            self.updateTitle()
+                        case .failure(let err):
+                            self.showSSHError(err, host: remote.host, path: remote.path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func guardDirty(_ proceed: @escaping () -> Void) {
+        guard let window = window else { proceed(); return }
+        if !isDirty { proceed(); return }
+        let alert = NSAlert()
+        alert.messageText = "You have unsaved changes."
+        alert.informativeText = "Do you want to save before continuing?"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                self.saveThenContinue(proceed)
+            case .alertSecondButtonReturn:
+                proceed()
+            default:
+                break
+            }
+        }
+    }
+
+    private func saveThenContinue(_ proceed: @escaping () -> Void) {
+        if let source = currentFile {
+            webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
+                guard let self = self, let content = result as? String else { return }
+                switch source {
+                case .local(let url):
+                    do {
+                        try content.write(to: url, atomically: true, encoding: .utf8)
+                        self.isDirty = false
+                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                        self.updateTitle()
+                        proceed()
+                    } catch {
+                        self.showError("Could not save: \(error.localizedDescription)")
+                    }
+                case .remote(let remote):
+                    SSHIO.write(content, to: remote) { writeResult in
+                        DispatchQueue.main.async {
+                            switch writeResult {
+                            case .success:
+                                self.isDirty = false
+                                self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                                self.updateTitle()
+                                proceed()
+                            case .failure(let err):
+                                self.showSSHError(err, host: remote.host, path: remote.path)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            guard let window = window else { return }
+            let panel = NSSavePanel()
+            if let mdType = UTType(filenameExtension: "md") { panel.allowedContentTypes = [mdType] }
+            panel.nameFieldStringValue = "Untitled.md"
+            panel.beginSheetModal(for: window) { [weak self] resp in
+                guard let self = self, resp == .OK, let url = panel.url else { return }
+                self.webView.evaluateJavaScript("window.creamyAPI.getContent()") { result, _ in
+                    guard let content = result as? String else { return }
+                    do {
+                        try content.write(to: url, atomically: true, encoding: .utf8)
+                        self.currentFile = .local(url)
+                        self.isDirty = false
+                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                        self.updateTitle()
+                        proceed()
+                    } catch {
+                        self.showError("Could not save: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    func updateTitle() {
+        guard let window = window else { return }
+        switch currentFile {
+        case .local(let url):
+            window.title = url.lastPathComponent
+            window.representedURL = url
+        case .remote(let remote):
+            window.title = "ssh: \(remote.display)"
+            window.representedURL = nil
+        case .none:
+            window.title = "Untitled"
+            window.representedURL = nil
+        }
+        window.isDocumentEdited = isDirty
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if !isDirty { return true }
+        guardDirty { [weak self] in self?.window?.close() }
+        return false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        appDelegate.removeWindow(self)
+    }
+
+    func showError(_ message: String) {
+        guard let window = window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Error"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+
+    private func showSSHError(_ error: Error, host: String, path: String?) {
+        guard let window = window else { return }
+        let info = SSHIO.describe(error: error, host: host, path: path)
+        let alert = NSAlert()
+        alert.messageText = info.title
+        alert.informativeText = info.body
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        switch message.name {
+        case "dirty":
+            isDirty = true
+            updateTitle()
+        case "ready":
+            jsReady = true
+            if let url = pendingFileToOpen {
+                pendingFileToOpen = nil
+                loadLocal(url)
+            } else if let remote = pendingRemoteToOpen {
+                pendingRemoteToOpen = nil
+                loadRemote(remote)
+            } else if shouldShowWelcomeIfNoPending {
+                shouldShowWelcomeIfNoPending = false
+                if appDelegate.shouldShowWelcomeAndConsume() {
+                    sendContentToEditor(AppDelegate.welcomeDocument, displayPath: nil)
+                    isDirty = true
+                    updateTitle()
+                }
+            }
+        case "openURL":
+            if let s = message.body as? String, let url = URL(string: s) {
+                NSWorkspace.shared.open(url)
+            }
+        default:
+            break
+        }
+    }
+
+    private func sendContentToEditor(_ content: String, displayPath: String?) {
+        let jsText = encodeForJS(content)
+        let jsPath = displayPath.map { encodeForJS($0) } ?? "null"
+        webView.evaluateJavaScript("window.creamyAPI.setContent(\(jsText), \(jsPath))")
+    }
+
+    func encodeForJS(_ str: String) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: [str], options: [])
+        var json = String(data: data, encoding: .utf8) ?? "[\"\"]"
+        json.removeFirst(); json.removeLast()
+        return json
     }
 }
 
