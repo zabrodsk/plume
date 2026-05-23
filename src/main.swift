@@ -895,6 +895,29 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
     @objc private func handleWillExitFullScreen(_ note: Notification) {
         webView.evaluateJavaScript("window.creamyAPI && window.creamyAPI.setFullscreen && window.creamyAPI.setFullscreen(false)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.updateTrafficLightClearance()
+        }
+    }
+
+    /// Tab strip sits inside fullSizeContentView; the standard traffic-light
+    /// cluster is overlaid by AppKit and its geometry shifts across macOS
+    /// versions (notably Tahoe). Measure the zoom button's right edge at
+    /// runtime and feed it to CSS as `--tl-clearance` so the spacer always
+    /// clears the cluster on whatever macOS we're on.
+    func updateTrafficLightClearance() {
+        guard jsReady, let window = window else { return }
+        let clearance: CGFloat
+        if let zoom = window.standardWindowButton(.zoomButton) {
+            let frameInWindow = zoom.convert(zoom.bounds, to: nil)
+            clearance = frameInWindow.maxX + 10
+        } else {
+            clearance = 100
+        }
+        let px = Int(clearance.rounded())
+        webView.evaluateJavaScript(
+            "document.body.style.setProperty('--tl-clearance', '\(px)px')"
+        )
     }
 
     // MARK: Tab lookup
@@ -1543,6 +1566,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     }
 
     private func handleJSReady() {
+        updateTrafficLightClearance()
         if let records = pendingRestoreTabs, !records.isEmpty {
             pendingRestoreTabs = nil
             restoreTabs(records, activeIndex: pendingRestoreActiveIndex)
