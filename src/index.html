@@ -97,8 +97,13 @@
     overflow: hidden;
     z-index: 2;
     user-select: text;
+    /* Inactive textareas in the pool are hidden but kept in the DOM so
+       per-textarea native undo history survives tab switching. */
+    display: none;
   }
+  .input-layer.active { display: block; }
   .input-layer::selection { background: var(--selection); }
+  #textarea-pool { display: contents; }
 
   /* The fresh char. NO `will-change` — there's only ever ≤1 of these in the
      DOM at a time, so GPU-layer hinting is unnecessary and harmful. */
@@ -403,25 +408,24 @@
   <div class="editor" id="editor">
     <div class="hint textbox" id="hint">Start writing…</div>
     <div class="render-layer textbox" id="render"></div>
-    <textarea class="input-layer textbox"
-              id="input"
-              autofocus
-              spellcheck="false"
-              autocomplete="off"
-              autocapitalize="off"
-              wrap="soft"></textarea>
+    <!-- Textarea pool: one per tab. JS mounts/unmounts as tabs open/close. -->
+    <div id="textarea-pool"></div>
   </div>
 <div id="cheatsheet">
   <div class="cheatsheet-inner">
     <div>
       <h2>Files</h2>
       <ul>
-        <li><kbd>⌘N</kbd><span class="desc">New</span></li>
+        <li><kbd>⌘T</kbd><span class="desc">New Tab</span></li>
+        <li><kbd>⌘N</kbd><span class="desc">New Window</span></li>
         <li><kbd>⌘O</kbd><span class="desc">Open local</span></li>
         <li><kbd>⌥⌘O</kbd><span class="desc">Open via SSH</span></li>
         <li><kbd>⌘S</kbd><span class="desc">Save</span></li>
         <li><kbd>⇧⌘S</kbd><span class="desc">Save As…</span></li>
-        <li><kbd>⌘W</kbd><span class="desc">Close window</span></li>
+        <li><kbd>⌘W</kbd><span class="desc">Close Tab / Window</span></li>
+        <li><kbd>⇧⌘W</kbd><span class="desc">Close Window</span></li>
+        <li><kbd>⌘1</kbd>–<kbd>⌘9</kbd><span class="desc">Select tab</span></li>
+        <li><kbd>⇧⌘]</kbd> / <kbd>⇧⌘[</kbd><span class="desc">Next / prev tab</span></li>
       </ul>
     </div>
     <div>
@@ -453,23 +457,45 @@
 <script>
   const $editor = document.getElementById('editor');
   const $render = document.getElementById('render');
-  const $input  = document.getElementById('input');
   const $hint   = document.getElementById('hint');
+  const $pool   = document.getElementById('textarea-pool');
   $hint.textContent = 'Start writing…';
 
   const native = (typeof window.webkit !== 'undefined' &&
                   window.webkit.messageHandlers) ? window.webkit.messageHandlers : null;
 
-  let clean = true;
+  // ── Textarea pool ──────────────────────────────────────────────────────────
+  // One textarea per open tab. Inactive textareas stay in the DOM with
+  // display:none so per-textarea native undo history survives tab switches.
+  const _textareas = new Map();   // tabId → HTMLTextAreaElement
+  const _cleanFlags = new Map();  // tabId → bool; per-tab dirty tracking
+  let _activeTabId = null;
+  // $input always points to the active textarea (or null when no tabs).
+  let $input = null;
+
   let mergeTimer = null;
 
+  function buildTextarea(tabId) {
+    const ta = document.createElement('textarea');
+    ta.className = 'input-layer textbox';
+    ta.setAttribute('data-tab-id', tabId);
+    ta.spellcheck = false;
+    ta.autocomplete = 'off';
+    ta.autocapitalize = 'off';
+    ta.setAttribute('wrap', 'soft');
+    ta.addEventListener('input', onInput);
+    ta.addEventListener('paste', onPaste);
+    return ta;
+  }
+
   function notifyDirty() {
-    if (clean && native && native.dirty) native.dirty.postMessage(true);
-    clean = false;
-    // Reflect dirty state in the single Phase-B tab.
-    if (typeof _tabs !== 'undefined' && _tabs && _tabs.length === 1 && !_tabs[0].dirty) {
-      _tabs[0].dirty = true;
-      if (typeof renderTabs === 'function') renderTabs();
+    if (!_activeTabId) return;
+    if (_cleanFlags.get(_activeTabId) !== false) {
+      // Was clean — fire dirty.
+      _cleanFlags.set(_activeTabId, false);
+      if (native && native.dirty) {
+        native.dirty.postMessage({ tabId: _activeTabId });
+      }
     }
   }
 
@@ -817,13 +843,14 @@
   function scheduleMerge() {
     if (mergeTimer != null) clearTimeout(mergeTimer);
     mergeTimer = setTimeout(() => {
-      setRenderText($input.value);
+      if ($input) setRenderText($input.value);
       mergeTimer = null;
     }, 140);
   }
 
   let lastRenderHeight = 0;
   function resizeTextarea() {
+    if (!$input) return;
     const h = $render.offsetHeight;
     if (h !== lastRenderHeight) {
       $input.style.height = h + 'px';
@@ -832,11 +859,15 @@
   }
 
   function updateHint() {
-    if ($input.value.length > 0) $hint.classList.add('gone');
+    const v = $input ? $input.value : '';
+    if (v.length > 0) $hint.classList.add('gone');
     else $hint.classList.remove('gone');
   }
 
-  $input.addEventListener('input', (e) => {
+  function onInput(e) {
+    if (!$input) return;
+    // Ignore input events from inactive textareas (shouldn't fire, defensive).
+    if (e.target !== $input) return;
     const want = $input.value;
     if (find.active) { find.close(); }
     // Animate single-character insertText only. Paste, autocomplete, delete,
@@ -852,9 +883,10 @@
     resizeTextarea();
     updateHint();
     notifyDirty();
-  });
+  }
 
   $editor.addEventListener('mousedown', (e) => {
+    if (!$input) return;
     if (e.target !== $input) $input.focus();
   });
 
@@ -864,10 +896,9 @@
   const $tablist = document.getElementById('tablist');
   const $tabAdd  = document.getElementById('tab-add');
 
-  // Phase B: tab strip is a thin view layer. We just render whatever the
-  // native side hands us via setTabs. Phase C wires this up to a real
-  // textarea pool; for now it follows the single active document.
-  let _tabs = [{ id: 'phase-b-default', title: 'Untitled', dirty: false, active: true }];
+  // Native is the source of truth for the tab list. We hold a parallel view
+  // model just to render the strip.
+  let _tabs = [];
 
   function renderTabs() {
     while ($tablist.firstChild) $tablist.removeChild($tablist.firstChild);
@@ -913,30 +944,73 @@
   // ── End Tab strip ──────────────────────────────────────────────────────────
 
   window.creamyAPI = {
-    setContent(text, path) {
+    // ── Tab pool management ────────────────────────────────────────────────
+    // Mount a new textarea for `tabId`. Caller (native) typically follows
+    // with activateTab(tabId) to focus and render it.
+    openTab(tabId, content, _path) {
+      tabId = String(tabId);
+      if (_textareas.has(tabId)) return;
+      const ta = buildTextarea(tabId);
+      ta.value = (content == null) ? '' : String(content);
+      _textareas.set(tabId, ta);
+      _cleanFlags.set(tabId, true);
+      $pool.appendChild(ta);
+    },
+    activateTab(tabId) {
+      tabId = String(tabId);
+      const ta = _textareas.get(tabId);
+      if (!ta) return;
+      if (_activeTabId === tabId) { ta.focus(); return; }
+      // Hide previous active.
+      if ($input) $input.classList.remove('active');
+      // Cancel any pending merge from the previous tab's fresh-char animation.
       if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
-      const t = (text == null) ? '' : String(text);
-      $input.value = t;
-      setRenderText(t);
+      _activeTabId = tabId;
+      $input = ta;
+      ta.classList.add('active');
+      // Re-render the render layer against the now-active textarea's value.
+      // We do NOT reassign $input.value here — that would destroy native undo.
+      setRenderText(ta.value);
       resizeTextarea();
       updateHint();
-      $input.setSelectionRange(0, 0);
-      $input.focus();
-      clean = true;
-      // Phase B: keep the single tab's title in sync with the current document.
-      if (_tabs.length === 1) {
-        _tabs[0].title = path ? path.split('/').pop() : 'Untitled';
-        _tabs[0].dirty = false;
-        renderTabs();
+      ta.focus();
+    },
+    closeTab(tabId) {
+      tabId = String(tabId);
+      const ta = _textareas.get(tabId);
+      if (!ta) return;
+      if (ta.parentNode) ta.parentNode.removeChild(ta);
+      _textareas.delete(tabId);
+      _cleanFlags.delete(tabId);
+      if (_activeTabId === tabId) {
+        _activeTabId = null;
+        $input = null;
       }
     },
-    getContent() { return $input.value; },
-    markClean() {
-      clean = true;
-      if (_tabs.length === 1) { _tabs[0].dirty = false; renderTabs(); }
+    getTabContent(tabId) {
+      const ta = _textareas.get(String(tabId));
+      return ta ? ta.value : '';
     },
+    // Replace the content of an inactive tab (or after explicit user action like
+    // Save As, where losing undo is acceptable). Per the architecture rule, do
+    // not call this on the active tab unless you accept the undo loss.
+    setTabContent(tabId, content, _path) {
+      const ta = _textareas.get(String(tabId));
+      if (!ta) return;
+      ta.value = (content == null) ? '' : String(content);
+      _cleanFlags.set(String(tabId), true);
+      if (String(tabId) === _activeTabId) {
+        if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
+        setRenderText(ta.value);
+        resizeTextarea();
+        updateHint();
+      }
+    },
+    markTabClean(tabId) {
+      _cleanFlags.set(String(tabId), true);
+    },
+    // Replace the rendered tab strip. Native is the source of truth.
     setTabs(tabs) {
-      // Native is the source of truth for the tab list.
       _tabs = (tabs || []).map(t => ({
         id: String(t.id),
         title: String(t.title || 'Untitled'),
@@ -964,6 +1038,7 @@
     query: '',
 
     open() {
+      if (!$input) return;
       find.active = true;
       document.body.classList.add('has-find');
       $findbar.classList.add('visible');
@@ -979,15 +1054,17 @@
       document.body.classList.remove('has-find');
       $findbar.classList.remove('visible');
       if (mergeTimer != null) { clearTimeout(mergeTimer); mergeTimer = null; }
-      setRenderText($input.value);
-      resizeTextarea();
-      $input.focus();
+      if ($input) {
+        setRenderText($input.value);
+        resizeTextarea();
+        $input.focus();
+      }
     },
 
     setQuery(q) {
       find.query = q;
       find.matches = [];
-      if (q.length > 0) {
+      if (q.length > 0 && $input) {
         const text = $input.value;
         const lower = text.toLowerCase();
         const lq = q.toLowerCase();
@@ -1028,7 +1105,7 @@
 
     highlight() {
       while ($render.firstChild) $render.removeChild($render.firstChild);
-      const text = $input.value;
+      const text = $input ? $input.value : '';
       if (find.matches.length === 0) {
         $render.appendChild(document.createTextNode(text));
         find.updateStatus();
@@ -1170,7 +1247,9 @@
     return walk(tmp);
   }
 
-  $input.addEventListener('paste', (e) => {
+  function onPaste(e) {
+    if (!$input) return;
+    if (e.target !== $input) return;
     if (find.active && document.activeElement !== $input) return;
     const cd = e.clipboardData;
     if (!cd) return;
@@ -1220,14 +1299,14 @@
     const newPos = selStart + text.length;
     $input.setSelectionRange(newPos, newPos);
     $input.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', data: null }));
-  });
+  }
   // ── End Smarter paste ────────────────────────────────────────────────────────
 
   if (native && native.ready) native.ready.postMessage(true);
 
   resizeTextarea();
   updateHint();
-  requestAnimationFrame(() => $input.focus());
+  requestAnimationFrame(() => { if ($input) $input.focus(); });
 </script>
 </body>
 </html>

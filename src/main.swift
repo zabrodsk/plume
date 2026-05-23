@@ -172,12 +172,7 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let url = URL(fileURLWithPath: filename)
-        if let controller = activeWindowController() {
-            controller.loadLocalWhenReady(url)
-        } else {
-            pendingFileToOpen = url
-            spawnInitialWindow()
-        }
+        openOrFocusLocal(url)
         return true
     }
 
@@ -191,20 +186,49 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
                 }()
                 guard !host.isEmpty else { continue }
                 let remote = SSHPath(user: nil, host: host, path: path)
-                if let controller = activeWindowController() {
-                    controller.loadRemoteWhenReady(remote)
-                } else {
-                    pendingRemoteToOpen = remote
-                    spawnInitialWindow()
-                }
+                openOrFocusRemote(remote)
             } else if url.isFileURL {
-                if let controller = activeWindowController() {
-                    controller.loadLocalWhenReady(url)
-                } else {
-                    pendingFileToOpen = url
-                    spawnInitialWindow()
+                openOrFocusLocal(url)
+            }
+        }
+    }
+
+    /// Open a local URL: focus existing tab if already open anywhere, otherwise
+    /// open as a new tab in the active window (or in a fresh window if none).
+    func openOrFocusLocal(_ url: URL) {
+        let standard = url.standardizedFileURL
+        for controller in windows {
+            for tab in controller.tabs {
+                if case .local(let existing)? = tab.source, existing.standardizedFileURL == standard {
+                    controller.window?.makeKeyAndOrderFront(nil)
+                    controller.activateTab(id: tab.id)
+                    return
                 }
             }
+        }
+        if let controller = activeWindowController() {
+            controller.openLocalAsNewTab(url)
+        } else {
+            pendingFileToOpen = url
+            spawnInitialWindow()
+        }
+    }
+
+    func openOrFocusRemote(_ remote: SSHPath) {
+        for controller in windows {
+            for tab in controller.tabs {
+                if case .remote(let existing)? = tab.source, existing == remote {
+                    controller.window?.makeKeyAndOrderFront(nil)
+                    controller.activateTab(id: tab.id)
+                    return
+                }
+            }
+        }
+        if let controller = activeWindowController() {
+            controller.openRemoteAsNewTab(remote)
+        } else {
+            pendingRemoteToOpen = remote
+            spawnInitialWindow()
         }
     }
 
@@ -244,6 +268,17 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         return true
     }
 
+    // MARK: App-level menu actions
+
+    @objc func newWindow(_ sender: Any?) {
+        let controller = newWindowController()
+        controller.showWindow(nil)
+        controller.shouldShowWelcomeIfNoPending = false
+        // A new window starts with one Untitled tab. The controller will add it
+        // once JS is ready.
+        controller.startsWithEmptyUntitled = true
+    }
+
     func setupMenu() {
         let mainMenu = NSMenu()
 
@@ -280,10 +315,18 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
 
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
-        // Window-scoped: dispatch via responder chain (target = nil).
-        let newItem = NSMenuItem(title: "New", action: #selector(PlumeWindowController.newFile), keyEquivalent: "n")
-        newItem.target = nil
-        fileMenu.addItem(newItem)
+
+        // New Tab — window-scoped via responder chain.
+        let newTabItem = NSMenuItem(title: "New Tab", action: #selector(PlumeWindowController.newTab), keyEquivalent: "t")
+        newTabItem.target = nil
+        fileMenu.addItem(newTabItem)
+
+        // New Window — app-global, opens a fresh PlumeWindowController.
+        let newWindowItem = NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: "n")
+        newWindowItem.target = self
+        fileMenu.addItem(newWindowItem)
+
+        fileMenu.addItem(.separator())
 
         let openItem = NSMenuItem(title: "Open\u{2026}", action: #selector(PlumeWindowController.openFile), keyEquivalent: "o")
         openItem.target = nil
@@ -312,10 +355,19 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         fileMenu.addItem(saveAs)
 
         fileMenu.addItem(.separator())
-        // performClose travels the responder chain naturally; no target needed.
-        fileMenu.addItem(NSMenuItem(title: "Close",
-                                    action: #selector(NSWindow.performClose(_:)),
-                                    keyEquivalent: "w"))
+
+        // Close Tab — ⌘W. Window-scoped. Falls through to closing the window if last tab.
+        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(PlumeWindowController.closeTab), keyEquivalent: "w")
+        closeTabItem.target = nil
+        fileMenu.addItem(closeTabItem)
+
+        // Close Window — ⇧⌘W. Plain NSWindow.performClose travels the responder chain.
+        let closeWindowItem = NSMenuItem(title: "Close Window",
+                                         action: #selector(NSWindow.performClose(_:)),
+                                         keyEquivalent: "W")
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(closeWindowItem)
+
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
@@ -357,6 +409,49 @@ Delete this. Type something. Save with `⌘S`. That's all there is.
         windowMenu.addItem(NSMenuItem(title: "Zoom",
                                       action: #selector(NSWindow.performZoom(_:)),
                                       keyEquivalent: ""))
+        windowMenu.addItem(.separator())
+
+        // Next / previous tab.
+        let nextTab = NSMenuItem(title: "Select Next Tab",
+                                 action: #selector(PlumeWindowController.selectNextTab),
+                                 keyEquivalent: "]")
+        nextTab.keyEquivalentModifierMask = [.command, .shift]
+        nextTab.target = nil
+        windowMenu.addItem(nextTab)
+        let prevTab = NSMenuItem(title: "Select Previous Tab",
+                                 action: #selector(PlumeWindowController.selectPrevTab),
+                                 keyEquivalent: "[")
+        prevTab.keyEquivalentModifierMask = [.command, .shift]
+        prevTab.target = nil
+        windowMenu.addItem(prevTab)
+
+        // ⌃⇥ / ⌃⇧⇥ alternates.
+        let nextTabAlt = NSMenuItem(title: "Select Next Tab (alt)",
+                                    action: #selector(PlumeWindowController.selectNextTab),
+                                    keyEquivalent: "\t")
+        nextTabAlt.keyEquivalentModifierMask = [.control]
+        nextTabAlt.isAlternate = true
+        nextTabAlt.target = nil
+        windowMenu.addItem(nextTabAlt)
+        let prevTabAlt = NSMenuItem(title: "Select Previous Tab (alt)",
+                                    action: #selector(PlumeWindowController.selectPrevTab),
+                                    keyEquivalent: "\t")
+        prevTabAlt.keyEquivalentModifierMask = [.control, .shift]
+        prevTabAlt.isAlternate = true
+        prevTabAlt.target = nil
+        windowMenu.addItem(prevTabAlt)
+
+        // ⌘1..⌘9 select tab N.
+        for i in 1...9 {
+            let item = NSMenuItem(title: "Tab \(i)",
+                                  action: #selector(PlumeWindowController.selectTabAtIndex(_:)),
+                                  keyEquivalent: "\(i)")
+            item.keyEquivalentModifierMask = [.command]
+            item.tag = i - 1
+            item.target = nil
+            windowMenu.addItem(item)
+        }
+
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
         NSApp.windowsMenu = windowMenu
@@ -437,14 +532,15 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
     var webView: WKWebView!
 
-    // Single-tab semantics for Phase A. Phase C introduces the array + activeTabId.
-    var currentFile: FileSource?
-    var isDirty: Bool = false
+    // Tab model.
+    var tabs: [Tab] = []
+    var activeTabId: UUID?
     var jsReady: Bool = false
 
     var pendingFileToOpen: URL?
     var pendingRemoteToOpen: SSHPath?
     var shouldShowWelcomeIfNoPending: Bool = false
+    var startsWithEmptyUntitled: Bool = false
 
     private var browseController: BrowseWindowController?
     private var currentReadTask: SSHTask?
@@ -501,7 +597,6 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         window.contentView = webView
         updateTitle()
 
-        // Fullscreen observers — toggle body.fullscreen so the tab-strip spacer collapses.
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleWillEnterFullScreen(_:)),
             name: NSWindow.willEnterFullScreenNotification, object: window
@@ -512,6 +607,18 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         )
     }
 
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        window?.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func handleWillEnterFullScreen(_ note: Notification) {
         webView.evaluateJavaScript("window.creamyAPI && window.creamyAPI.setFullscreen && window.creamyAPI.setFullscreen(true)")
     }
@@ -520,181 +627,180 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         webView.evaluateJavaScript("window.creamyAPI && window.creamyAPI.setFullscreen && window.creamyAPI.setFullscreen(false)")
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+    // MARK: Tab lookup
 
-    override func showWindow(_ sender: Any?) {
-        super.showWindow(sender)
-        window?.makeKeyAndOrderFront(sender)
-        NSApp.activate(ignoringOtherApps: true)
+    var activeTab: Tab? {
+        guard let id = activeTabId else { return nil }
+        return tabs.first(where: { $0.id == id })
     }
 
-    // MARK: Public load-when-ready entry points
-
-    func loadLocalWhenReady(_ url: URL) {
-        if jsReady { loadLocal(url) } else { pendingFileToOpen = url }
+    func tab(withId id: UUID) -> Tab? {
+        return tabs.first(where: { $0.id == id })
     }
 
-    func loadRemoteWhenReady(_ remote: SSHPath) {
-        if jsReady { loadRemote(remote) } else { pendingRemoteToOpen = remote }
+    func indexOfTab(id: UUID) -> Int? {
+        return tabs.firstIndex(where: { $0.id == id })
     }
 
-    // MARK: Menu actions (responder-chain, target = nil)
+    // MARK: Tab create / activate / close
 
-    @objc func performFind() {
-        webView.evaluateJavaScript("window.find_open && window.find_open()")
-    }
-
-    @objc func showCheatsheet() {
-        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
-    }
-
-    @objc func newFile() {
-        guardDirty { [weak self] in
-            guard let self = self else { return }
-            self.currentFile = nil
-            self.webView.evaluateJavaScript("window.creamyAPI.setContent('', null)")
-            self.isDirty = false
-            self.updateTitle()
+    /// Insert a tab into the model, mount its textarea in JS, and activate it.
+    func addTabAndActivate(_ tab: Tab) {
+        tabs.append(tab)
+        let jsContent = encodeForJS(tab.content)
+        let jsPath: String
+        switch tab.source {
+        case .local(let url): jsPath = encodeForJS(url.path)
+        case .remote(let r):  jsPath = encodeForJS(r.display)
+        case .none:           jsPath = "null"
         }
+        webView.evaluateJavaScript("window.creamyAPI.openTab('\(tab.id.uuidString)', \(jsContent), \(jsPath))")
+        activateTab(id: tab.id)
     }
 
-    @objc func openFile() {
-        guard let window = window else { return }
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        if let mdType = UTType(filenameExtension: "md") {
-            panel.allowedContentTypes = [mdType, .plainText]
-        }
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self = self, response == .OK, let url = panel.url else { return }
-            self.guardDirty { self.loadLocal(url) }
-        }
-    }
-
-    @objc func openRemote() {
-        guard let window = window else { return }
-        guardDirty { [weak self] in
-            guard let self = self else { return }
-            let alert = NSAlert()
-            alert.messageText = "Open via SSH"
-            alert.informativeText = "Pick a host to browse, or type a full [user@]host:path to open directly."
-            alert.addButton(withTitle: "Open")
-            alert.addButton(withTitle: "Cancel")
-
-            let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-            combo.placeholderString = "user@host  or  user@host:/path/to/file.md"
-            combo.completes = true
-            combo.usesDataSource = false
-            combo.addItems(withObjectValues: SSHConfig.hostAliases())
-
-            let key = "plume.sshDialogSeen"
-            let firstTime = !UserDefaults.standard.bool(forKey: key)
-
-            let hint: NSTextField? = firstTime ? {
-                let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
-                label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
-                label.textColor = NSColor.secondaryLabelColor
-                label.maximumNumberOfLines = 2
-                label.lineBreakMode = .byWordWrapping
-                return label
-            }() : nil
-
-            let accessoryView: NSView
-            if let hint = hint {
-                let stack = NSStackView(views: [combo, hint])
-                stack.orientation = .vertical
-                stack.alignment = .leading
-                stack.spacing = 6
-                stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
-                accessoryView = stack
-            } else {
-                accessoryView = combo
-            }
-            alert.accessoryView = accessoryView
-            alert.window.initialFirstResponder = combo
-
-            if firstTime {
-                UserDefaults.standard.set(true, forKey: key)
-            }
-
-            alert.beginSheetModal(for: window) { response in
-                guard response == .alertFirstButtonReturn else { return }
-                let raw = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !raw.isEmpty else { return }
-
-                if raw.contains(":") {
-                    // Full [user@]host:path — existing fast-path.
-                    guard let remote = SSHPath.parse(raw) else {
-                        self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
-                        return
-                    }
-                    self.loadRemote(remote)
-                } else {
-                    // Host alias — open browse window.
-                    let host = raw
-                    let lastPath = UserDefaults.standard.string(forKey: "plume.lastDir.\(host)") ?? "."
-                    self.browseController = BrowseWindowController(host: host, initialPath: lastPath) { [weak self] picked in
-                        self?.loadRemote(picked)
-                        self?.browseController = nil
-                    }
-                    self.browseController?.showWindow(nil)
+    /// Activate `id`: snapshot current tab's content first, then ask JS to swap.
+    func activateTab(id: UUID) {
+        guard tab(withId: id) != nil else { return }
+        // Snapshot outgoing tab's value so persistence and same-window save-as see fresh content.
+        if let activeId = activeTabId, activeId != id, let outgoing = self.tab(withId: activeId) {
+            webView.evaluateJavaScript("window.creamyAPI.getTabContent('\(activeId.uuidString)')") { [weak self] result, _ in
+                if let content = result as? String {
+                    outgoing.content = content
                 }
+                self?.performActivate(id: id)
             }
+        } else {
+            performActivate(id: id)
         }
     }
 
-    func loadLocal(_ url: URL) {
+    private func performActivate(id: UUID) {
+        activeTabId = id
+        webView.evaluateJavaScript("window.creamyAPI.activateTab('\(id.uuidString)')")
+        updateTitle()
+        refreshTabStrip()
+    }
+
+    /// Close a tab. If dirty, prompts via guardDirty. If it's the last tab,
+    /// falls through to closing the window.
+    func closeTabById(_ id: UUID) {
+        guard let idx = indexOfTab(id: id), let tab = self.tab(withId: id) else { return }
+        guardDirty(tab) { [weak self] in
+            guard let self = self else { return }
+            self.tabs.remove(at: idx)
+            self.webView.evaluateJavaScript("window.creamyAPI.closeTab('\(id.uuidString)')")
+            if self.tabs.isEmpty {
+                // Last tab — close the window. Don't trigger guardDirty again; we just
+                // accepted the close path. windowShouldClose will see empty/clean state.
+                self.window?.close()
+                return
+            }
+            // Activate adjacent tab.
+            let newActive = self.tabs[min(idx, self.tabs.count - 1)]
+            self.activeTabId = newActive.id
+            self.webView.evaluateJavaScript("window.creamyAPI.activateTab('\(newActive.id.uuidString)')")
+            self.updateTitle()
+            self.refreshTabStrip()
+        }
+    }
+
+    /// Push the current tab list to JS so the strip renders accurately.
+    func refreshTabStrip() {
+        var rows: [String] = []
+        for tab in tabs {
+            let title = encodeForJS(tab.title)
+            let active = (tab.id == activeTabId) ? "true" : "false"
+            let dirty = tab.isDirty ? "true" : "false"
+            rows.append("{id:'\(tab.id.uuidString)', title:\(title), active:\(active), dirty:\(dirty)}")
+        }
+        let arr = "[" + rows.joined(separator: ",") + "]"
+        webView.evaluateJavaScript("window.creamyAPI.setTabs(\(arr))")
+    }
+
+    // MARK: Public load-when-ready entry points (used by AppDelegate dedup)
+
+    func openLocalAsNewTab(_ url: URL) {
+        if !jsReady { pendingFileToOpen = url; return }
         do {
             let content = try String(contentsOf: url, encoding: .utf8)
-            currentFile = .local(url)
-            isDirty = false
-            sendContentToEditor(content, displayPath: url.path)
-            updateTitle()
+            let tab = Tab(source: .local(url), content: content, isDirty: false)
+            addTabAndActivate(tab)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
         } catch {
             showError("Could not read file: \(error.localizedDescription)")
         }
     }
 
-    func loadRemote(_ remote: SSHPath) {
+    func openRemoteAsNewTab(_ remote: SSHPath) {
+        if !jsReady { pendingRemoteToOpen = remote; return }
+        // Create a placeholder tab synchronously so the user sees the strip update;
+        // fill in content once the SSH read returns.
+        let tab = Tab(source: .remote(remote), content: "", isDirty: false)
+        tabs.append(tab)
+        webView.evaluateJavaScript("window.creamyAPI.openTab('\(tab.id.uuidString)', '', \(encodeForJS(remote.display)))")
+        activeTabId = tab.id
+        webView.evaluateJavaScript("window.creamyAPI.activateTab('\(tab.id.uuidString)')")
+        refreshTabStrip()
+        updateTitle()
+        beginRemoteRead(remote, into: tab)
+    }
+
+    private func beginRemoteRead(_ remote: SSHPath, into targetTab: Tab) {
         guard let window = window else { return }
         window.title = "Loading \(remote.display)…"
 
-        // Install an Esc key monitor while the read is in flight.
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.currentReadTask != nil else { return event }
-            if event.keyCode == 53 {  // Esc
+            if event.keyCode == 53 {
                 self.currentReadTask?.cancel()
                 return nil
             }
             return event
         }
 
-        let task = SSHIO.read(remote) { [weak self] result in
+        let task = SSHIO.read(remote) { [weak self, weak targetTab] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.dismissReadProgress()
                 switch result {
                 case .success(let content):
-                    self.currentFile = .remote(remote)
-                    self.isDirty = false
-                    self.sendContentToEditor(content, displayPath: remote.display)
+                    guard let target = targetTab else { return }
+                    target.content = content
+                    target.isDirty = false
+                    // Replace the tab's buffer. Safe even if active because
+                    // it's a fresh, user-initiated load.
+                    self.webView.evaluateJavaScript(
+                        "window.creamyAPI.setTabContent('\(target.id.uuidString)', \(self.encodeForJS(content)), \(self.encodeForJS(remote.display)))"
+                    )
                     self.updateTitle()
+                    self.refreshTabStrip()
                     if let url = self.recentURL(for: remote) {
                         NSDocumentController.shared.noteNewRecentDocumentURL(url)
                     }
                 case .failure(let err):
+                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError {
+                        // Roll back the placeholder tab.
+                        if let target = targetTab, let idx = self.indexOfTab(id: target.id) {
+                            self.tabs.remove(at: idx)
+                            self.webView.evaluateJavaScript("window.creamyAPI.closeTab('\(target.id.uuidString)')")
+                            if let last = self.tabs.last {
+                                self.activeTabId = last.id
+                                self.webView.evaluateJavaScript("window.creamyAPI.activateTab('\(last.id.uuidString)')")
+                            } else {
+                                self.activeTabId = nil
+                            }
+                            self.refreshTabStrip()
+                            self.updateTitle()
+                        }
+                        return
+                    }
                     self.updateTitle()
-                    if case SSHIO.SSHError.cancelled? = err as? SSHIO.SSHError { return }
                     self.showSSHError(err, host: remote.host, path: remote.path)
                 }
             }
         }
         currentReadTask = task
 
-        // Show the overlay after 250 ms — skip it entirely if the read is already done.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self = self, self.currentReadTask != nil,
                   let contentView = self.window?.contentView else { return }
@@ -720,8 +826,6 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         }
     }
 
-    /// Synthesise a plume-ssh:// URL for Open Recent. We use a custom scheme so
-    /// NSDocumentController can track remote files the same way it tracks local ones.
     private func recentURL(for remote: SSHPath) -> URL? {
         var components = URLComponents()
         components.scheme = "plume-ssh"
@@ -738,40 +842,172 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         return components.url
     }
 
+    // MARK: Menu actions (responder-chain, target = nil)
+
+    @objc func performFind() {
+        webView.evaluateJavaScript("window.find_open && window.find_open()")
+    }
+
+    @objc func showCheatsheet() {
+        webView.evaluateJavaScript("window.cheatsheet_open && window.cheatsheet_open()")
+    }
+
+    @objc func newTab() {
+        let tab = Tab(source: nil, content: "", isDirty: false)
+        addTabAndActivate(tab)
+    }
+
+    @objc func closeTab() {
+        guard let active = activeTab else {
+            // No tabs — close the window.
+            window?.performClose(nil)
+            return
+        }
+        closeTabById(active.id)
+    }
+
+    @objc func selectNextTab() {
+        guard !tabs.isEmpty, let activeId = activeTabId,
+              let idx = indexOfTab(id: activeId) else { return }
+        let next = (idx + 1) % tabs.count
+        activateTab(id: tabs[next].id)
+    }
+
+    @objc func selectPrevTab() {
+        guard !tabs.isEmpty, let activeId = activeTabId,
+              let idx = indexOfTab(id: activeId) else { return }
+        let prev = (idx - 1 + tabs.count) % tabs.count
+        activateTab(id: tabs[prev].id)
+    }
+
+    @objc func selectTabAtIndex(_ sender: NSMenuItem) {
+        let idx = sender.tag
+        guard idx >= 0, idx < tabs.count else { return }
+        activateTab(id: tabs[idx].id)
+    }
+
+    @objc func openFile() {
+        guard let window = window else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if let mdType = UTType(filenameExtension: "md") {
+            panel.allowedContentTypes = [mdType, .plainText]
+        }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            self.appDelegate.openOrFocusLocal(url)
+        }
+    }
+
+    @objc func openRemote() {
+        guard let window = window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Open via SSH"
+        alert.informativeText = "Pick a host to browse, or type a full [user@]host:path to open directly."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+
+        let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        combo.placeholderString = "user@host  or  user@host:/path/to/file.md"
+        combo.completes = true
+        combo.usesDataSource = false
+        combo.addItems(withObjectValues: SSHConfig.hostAliases())
+
+        let key = "plume.sshDialogSeen"
+        let firstTime = !UserDefaults.standard.bool(forKey: key)
+
+        let hint: NSTextField? = firstTime ? {
+            let label = NSTextField(labelWithString: "Type a host, or just a path.\nPlume reads your ~/.ssh/config.")
+            label.font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask)
+            label.textColor = NSColor.secondaryLabelColor
+            label.maximumNumberOfLines = 2
+            label.lineBreakMode = .byWordWrapping
+            return label
+        }() : nil
+
+        let accessoryView: NSView
+        if let hint = hint {
+            let stack = NSStackView(views: [combo, hint])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 6
+            stack.frame = NSRect(x: 0, y: 0, width: 360, height: 64)
+            accessoryView = stack
+        } else {
+            accessoryView = combo
+        }
+        alert.accessoryView = accessoryView
+        alert.window.initialFirstResponder = combo
+
+        if firstTime {
+            UserDefaults.standard.set(true, forKey: key)
+        }
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self, response == .alertFirstButtonReturn else { return }
+            let raw = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { return }
+
+            if raw.contains(":") {
+                guard let remote = SSHPath.parse(raw) else {
+                    self.showError("Invalid SSH path. Use [user@]host:/path/to/file.")
+                    return
+                }
+                self.appDelegate.openOrFocusRemote(remote)
+            } else {
+                let host = raw
+                let lastPath = UserDefaults.standard.string(forKey: "plume.lastDir.\(host)") ?? "."
+                self.browseController = BrowseWindowController(host: host, initialPath: lastPath) { [weak self] picked in
+                    self?.appDelegate.openOrFocusRemote(picked)
+                    self?.browseController = nil
+                }
+                self.browseController?.showWindow(nil)
+            }
+        }
+    }
+
     @objc func saveFile() {
-        switch currentFile {
+        guard let tab = activeTab else { return }
+        switch tab.source {
         case .some(let source):
-            saveTo(source)
+            saveTab(tab, to: source)
         case .none:
             saveFileAs()
         }
     }
 
     @objc func saveFileAs() {
-        guard let window = window else { return }
+        guard let tab = activeTab, let window = window else { return }
         let panel = NSSavePanel()
         if let mdType = UTType(filenameExtension: "md") { panel.allowedContentTypes = [mdType] }
-        panel.nameFieldStringValue = currentFile?.displayName ?? "Untitled.md"
+        panel.nameFieldStringValue = tab.source?.displayName ?? "Untitled.md"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self = self, response == .OK, let url = panel.url else { return }
-            self.saveTo(.local(url))
+            self.saveTab(tab, to: .local(url))
         }
     }
 
-    func saveTo(_ source: FileSource) {
-        webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
+    /// Save a specific tab's content to a given file source. Updates the tab
+    /// and refreshes the title bar / tab strip.
+    func saveTab(_ tab: Tab, to source: FileSource) {
+        webView.evaluateJavaScript("window.creamyAPI.getTabContent('\(tab.id.uuidString)')") { [weak self] result, _ in
             guard let self = self else { return }
             guard let content = result as? String else {
                 self.showError("Could not read editor content."); return
             }
+            tab.content = content
             switch source {
             case .local(let url):
                 do {
                     try content.write(to: url, atomically: true, encoding: .utf8)
-                    self.currentFile = .local(url)
-                    self.isDirty = false
-                    self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                    tab.source = .local(url)
+                    tab.isDirty = false
+                    self.webView.evaluateJavaScript("window.creamyAPI.markTabClean('\(tab.id.uuidString)')")
                     self.updateTitle()
+                    self.refreshTabStrip()
+                    NSDocumentController.shared.noteNewRecentDocumentURL(url)
                 } catch {
                     self.showError("Could not save: \(error.localizedDescription)")
                 }
@@ -780,10 +1016,11 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
                     DispatchQueue.main.async {
                         switch writeResult {
                         case .success:
-                            self.currentFile = .remote(remote)
-                            self.isDirty = false
-                            self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                            tab.source = .remote(remote)
+                            tab.isDirty = false
+                            self.webView.evaluateJavaScript("window.creamyAPI.markTabClean('\(tab.id.uuidString)')")
                             self.updateTitle()
+                            self.refreshTabStrip()
                         case .failure(let err):
                             self.showSSHError(err, host: remote.host, path: remote.path)
                         }
@@ -793,9 +1030,14 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         }
     }
 
-    func guardDirty(_ proceed: @escaping () -> Void) {
+    /// Prompt-if-dirty around a specific tab. If clean, proceed immediately.
+    func guardDirty(_ tab: Tab, proceed: @escaping () -> Void) {
         guard let window = window else { proceed(); return }
-        if !isDirty { proceed(); return }
+        if !tab.isDirty { proceed(); return }
+        // Make this tab active so the user sees what they're being asked about.
+        if activeTabId != tab.id {
+            activateTab(id: tab.id)
+        }
         let alert = NSAlert()
         alert.messageText = "You have unsaved changes."
         alert.informativeText = "Do you want to save before continuing?"
@@ -806,7 +1048,7 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
             guard let self = self else { return }
             switch response {
             case .alertFirstButtonReturn:
-                self.saveThenContinue(proceed)
+                self.saveThenContinue(tab, proceed)
             case .alertSecondButtonReturn:
                 proceed()
             default:
@@ -815,17 +1057,19 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
         }
     }
 
-    private func saveThenContinue(_ proceed: @escaping () -> Void) {
-        if let source = currentFile {
-            webView.evaluateJavaScript("window.creamyAPI.getContent()") { [weak self] result, _ in
+    private func saveThenContinue(_ tab: Tab, _ proceed: @escaping () -> Void) {
+        if let source = tab.source {
+            webView.evaluateJavaScript("window.creamyAPI.getTabContent('\(tab.id.uuidString)')") { [weak self] result, _ in
                 guard let self = self, let content = result as? String else { return }
+                tab.content = content
                 switch source {
                 case .local(let url):
                     do {
                         try content.write(to: url, atomically: true, encoding: .utf8)
-                        self.isDirty = false
-                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                        tab.isDirty = false
+                        self.webView.evaluateJavaScript("window.creamyAPI.markTabClean('\(tab.id.uuidString)')")
                         self.updateTitle()
+                        self.refreshTabStrip()
                         proceed()
                     } catch {
                         self.showError("Could not save: \(error.localizedDescription)")
@@ -835,9 +1079,10 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
                         DispatchQueue.main.async {
                             switch writeResult {
                             case .success:
-                                self.isDirty = false
-                                self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                                tab.isDirty = false
+                                self.webView.evaluateJavaScript("window.creamyAPI.markTabClean('\(tab.id.uuidString)')")
                                 self.updateTitle()
+                                self.refreshTabStrip()
                                 proceed()
                             case .failure(let err):
                                 self.showSSHError(err, host: remote.host, path: remote.path)
@@ -853,14 +1098,16 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
             panel.nameFieldStringValue = "Untitled.md"
             panel.beginSheetModal(for: window) { [weak self] resp in
                 guard let self = self, resp == .OK, let url = panel.url else { return }
-                self.webView.evaluateJavaScript("window.creamyAPI.getContent()") { result, _ in
+                self.webView.evaluateJavaScript("window.creamyAPI.getTabContent('\(tab.id.uuidString)')") { result, _ in
                     guard let content = result as? String else { return }
                     do {
                         try content.write(to: url, atomically: true, encoding: .utf8)
-                        self.currentFile = .local(url)
-                        self.isDirty = false
-                        self.webView.evaluateJavaScript("window.creamyAPI.markClean()")
+                        tab.source = .local(url)
+                        tab.content = content
+                        tab.isDirty = false
+                        self.webView.evaluateJavaScript("window.creamyAPI.markTabClean('\(tab.id.uuidString)')")
                         self.updateTitle()
+                        self.refreshTabStrip()
                         proceed()
                     } catch {
                         self.showError("Could not save: \(error.localizedDescription)")
@@ -872,24 +1119,43 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
 
     func updateTitle() {
         guard let window = window else { return }
-        switch currentFile {
+        let tab = activeTab
+        switch tab?.source {
         case .local(let url):
             window.title = url.lastPathComponent
             window.representedURL = url
         case .remote(let remote):
             window.title = "ssh: \(remote.display)"
             window.representedURL = nil
-        case .none:
-            window.title = "Untitled"
+        case .none, .some(_):
+            window.title = tab?.title ?? "Untitled"
             window.representedURL = nil
         }
-        window.isDocumentEdited = isDirty
+        window.isDocumentEdited = tab?.isDirty ?? false
     }
 
+    /// Window-close gate: any dirty tab triggers a prompt for that tab.
+    /// When the user closes the window (⇧⌘W or red button), we run through
+    /// each dirty tab in order; the user can save, discard, or cancel each.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if !isDirty { return true }
-        guardDirty { [weak self] in self?.window?.close() }
-        return false
+        if let dirty = tabs.first(where: { $0.isDirty }) {
+            guardDirty(dirty) { [weak self] in
+                guard let self = self else { return }
+                // Remove the just-handled tab and recurse via window.performClose.
+                if let idx = self.indexOfTab(id: dirty.id) {
+                    self.tabs.remove(at: idx)
+                    self.webView.evaluateJavaScript("window.creamyAPI.closeTab('\(dirty.id.uuidString)')")
+                }
+                if self.tabs.isEmpty {
+                    self.window?.close()
+                } else {
+                    // More dirty tabs may remain — re-attempt the close.
+                    self.window?.performClose(nil)
+                }
+            }
+            return false
+        }
+        return true
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -918,41 +1184,73 @@ final class PlumeWindowController: NSWindowController, NSWindowDelegate, WKScrip
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "dirty":
-            isDirty = true
-            updateTitle()
-        case "ready":
-            jsReady = true
-            if let url = pendingFileToOpen {
-                pendingFileToOpen = nil
-                loadLocal(url)
-            } else if let remote = pendingRemoteToOpen {
-                pendingRemoteToOpen = nil
-                loadRemote(remote)
-            } else if shouldShowWelcomeIfNoPending {
-                shouldShowWelcomeIfNoPending = false
-                if appDelegate.shouldShowWelcomeAndConsume() {
-                    sendContentToEditor(AppDelegate.welcomeDocument, displayPath: nil)
-                    isDirty = true
+            // Payload: { tabId: "uuid" }
+            if let dict = message.body as? [String: Any],
+               let tabIdStr = dict["tabId"] as? String,
+               let tabId = UUID(uuidString: tabIdStr),
+               let tab = self.tab(withId: tabId) {
+                if !tab.isDirty {
+                    tab.isDirty = true
                     updateTitle()
+                    refreshTabStrip()
                 }
             }
+        case "ready":
+            jsReady = true
+            handleJSReady()
         case "openURL":
             if let s = message.body as? String, let url = URL(string: s) {
                 NSWorkspace.shared.open(url)
             }
         case "tabAction":
-            // Phase B stub: tab strip is single-tab and read-only from native.
-            // Phase C replaces this with real tab dispatch.
-            break
+            // Payload: { kind: "new"|"close"|"select", tabId: "uuid"|null }
+            guard let dict = message.body as? [String: Any],
+                  let kind = dict["kind"] as? String else { return }
+            switch kind {
+            case "new":
+                newTab()
+            case "select":
+                if let tabIdStr = dict["tabId"] as? String, let tabId = UUID(uuidString: tabIdStr) {
+                    activateTab(id: tabId)
+                }
+            case "close":
+                if let tabIdStr = dict["tabId"] as? String, let tabId = UUID(uuidString: tabIdStr) {
+                    closeTabById(tabId)
+                }
+            default:
+                break
+            }
         default:
             break
         }
     }
 
-    private func sendContentToEditor(_ content: String, displayPath: String?) {
-        let jsText = encodeForJS(content)
-        let jsPath = displayPath.map { encodeForJS($0) } ?? "null"
-        webView.evaluateJavaScript("window.creamyAPI.setContent(\(jsText), \(jsPath))")
+    private func handleJSReady() {
+        if let url = pendingFileToOpen {
+            pendingFileToOpen = nil
+            openLocalAsNewTab(url)
+            return
+        }
+        if let remote = pendingRemoteToOpen {
+            pendingRemoteToOpen = nil
+            openRemoteAsNewTab(remote)
+            return
+        }
+        if shouldShowWelcomeIfNoPending {
+            shouldShowWelcomeIfNoPending = false
+            if appDelegate.shouldShowWelcomeAndConsume() {
+                let tab = Tab(source: nil, content: AppDelegate.welcomeDocument, isDirty: true)
+                addTabAndActivate(tab)
+                return
+            }
+            // Fall through — open an empty Untitled.
+            startsWithEmptyUntitled = true
+        }
+        if startsWithEmptyUntitled {
+            startsWithEmptyUntitled = false
+            let tab = Tab(source: nil, content: "", isDirty: false)
+            addTabAndActivate(tab)
+        }
     }
 
     func encodeForJS(_ str: String) -> String {
@@ -1082,8 +1380,6 @@ final class BrowseWindowController: NSWindowController, NSTableViewDataSource, N
         window?.close()
     }
 
-    // MARK: Click handling
-
     @objc private func handleClick() {
         let row = tableView.clickedRow
         guard row >= 0, row < entries.count else { return }
@@ -1104,8 +1400,6 @@ final class BrowseWindowController: NSWindowController, NSTableViewDataSource, N
         }
     }
 
-    // MARK: Keyboard
-
     override func keyDown(with event: NSEvent) {
         let chars = event.charactersIgnoringModifiers ?? ""
         if chars == "\r" || chars == "\n" {
@@ -1117,21 +1411,16 @@ final class BrowseWindowController: NSWindowController, NSTableViewDataSource, N
             } else if entry.isOpenable {
                 pick(entry: entry)
             }
-        } else if chars == "\u{1B}" {  // Esc
+        } else if chars == "\u{1B}" {
             window?.close()
         } else if chars == "\u{7F}" || (event.modifierFlags.contains(.command) && chars == "\u{F700}") {
-            // Backspace or Cmd-Up: go to parent
             navigate(to: BrowseEntry(name: "..", isDirectory: true))
         } else {
             super.keyDown(with: event)
         }
     }
 
-    // MARK: NSTableViewDataSource
-
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
-
-    // MARK: NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry = entries[row]
