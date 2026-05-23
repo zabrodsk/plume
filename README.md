@@ -39,14 +39,44 @@
 |:---:|:---:|:---:|
 | **90 ms** | **Sparkle** | **3 files** |
 | Letter entrance | App updates | Source surface |
-| **<4 MB** | **12+** | **100 %** |
+| **~1 MB** | **12+** | **100 %** |
 | Universal binary | macOS supported | Open source · MIT |
 
 <br>
 
+## What's new in v3.1
+
+Plume now has a **per-tab markdown preview**. Press **⌘E** on any tab to
+flip between the editor and a fully rendered view: real headings, lists,
+fenced code with syntax highlighting, GFM tables, blockquotes, footnotes,
+task lists, and math. Each tab remembers its own mode across switches and
+relaunches.
+
+- **Toggle**: ⌘E on the active tab; tabs are independent, so tab A can be
+  in preview while tab B stays in edit.
+- **Rendering**: vendored stack — [markdown-it](https://github.com/markdown-it/markdown-it)
+  with GFM-friendly plugins (footnotes, anchors, task lists, emoji,
+  attrs), [highlight.js](https://highlightjs.org/) for fenced code, and
+  [KaTeX](https://katex.org/) for `$inline$` and `$$display$$` math.
+- **Live**: edits to the textarea repaint the preview within 100 ms; the
+  editor textarea is still the source of truth, so ⌘S in preview saves
+  exactly what you wrote, not the rendered HTML.
+- **Persisted**: `state.json` v2 stores each tab's view mode; v1 files
+  load transparently (every tab defaults to edit, and the file rewrites
+  itself as v2 on next save).
+
+### A brand-promise shift
+
+v3.0's "zero non-system dependencies" line is **relaxed** for the preview.
+The Swift binary stays small (~968 KB universal, no Swift deps added) but
+the `.app` bundle now ships ~1.0 MB of vendored JS/CSS/fonts under
+`Contents/Resources/preview/`: markdown-it, highlight.js, KaTeX, and
+github-markdown-css, plus a Plume CSS overlay. Writing tools deserve a
+polished preview, and the rest of the app stays as small as before.
+
 ## What's new in v3.0
 
-Plume now opens **multiple files at once**, both as **tabs in one window**
+Plume opens **multiple files at once**, both as **tabs in one window**
 and as **separate windows**. The brand still holds — *less app, more page* —
 the chrome just learned to share.
 
@@ -82,7 +112,8 @@ the chrome just learned to share.
 | `⌘1`–`⌘9` | Jump to tab N |
 | `⇧⌘]` / `⇧⌘[` | Next / previous tab |
 | `⌃⇥` / `⌃⇧⇥` | Next / previous tab (alt) |
-| `⌘F` | Find in page |
+| `⌘F` | Find in page (works in preview too) |
+| `⌘E` | Toggle preview / edit on the active tab |
 | `⌃⌘F` | Toggle full screen |
 | `⌘?` | Open the cheatsheet (shows everything) |
 
@@ -112,10 +143,13 @@ Requires macOS 12+ and the Swift toolchain (`xcode-select --install`).
 ```
 src/
   main.swift     Cocoa shell — window, menu, file I/O (incl. SSH), updater, JS bridge
-  index.html     Editor (dark mode), runs inside WKWebView
+  index.html     Editor + preview pane (dark mode), runs inside WKWebView
   icon.swift     Generates AppIcon.icns
   Info.plist     Bundle metadata
   build.sh       swiftc → lipo → iconutil → bundle → ad-hoc sign
+  preview/       Vendored renderer stack (v3.1) — markdown-it, highlight.js,
+                 KaTeX, github-markdown-css, plume-preview.css. Pinned
+                 versions in preview/VERSIONS.txt; licenses in preview/licenses/.
 dist/
   release.sh     Developer ID re-sign → DMG → notarize → staple → appcast
 docs/
@@ -126,7 +160,7 @@ docs/
 ROADMAP.md       v2 design notes — SSH and what stays out of scope
 ```
 
-Two files of source. Read them at lunch.
+Two files of source, plus a vendored preview stack. Read them at lunch.
 
 <br>
 
@@ -147,6 +181,15 @@ Behind the scenes:
 ## License
 
 MIT. See [LICENSE](LICENSE). No telemetry. No account. No analytics. No friction.
+
+The v3.1 preview pane ships vendored copies of four open-source libraries
+under their own licenses (all permissive, all included in
+`src/preview/licenses/`):
+
+- [markdown-it](https://github.com/markdown-it/markdown-it) — MIT
+- [highlight.js](https://highlightjs.org/) — BSD-3-Clause
+- [KaTeX](https://katex.org/) — MIT (fonts under SIL Open Font License)
+- [github-markdown-css](https://github.com/sindresorhus/github-markdown-css) — MIT
 
 <br>
 

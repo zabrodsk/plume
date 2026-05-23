@@ -9,14 +9,38 @@ The brand promise mostly survives.
 - ~~Universal binary under 300 KB.~~ **Adjusted in v3.0 to under 1 MB
   universal** (≈470 KB per architecture). The under-300 KB line was
   set before Sparkle and SSH; the realistic v2.7.2 baseline measured
-  ~636 KB universal. v3.0 measures ~948 KB universal — the +312 KB
-  delta is the tab strip, multi-tab state, Codable conformances, and
-  JSON persistence. Still the smallest notarized Mac editor we're
-  aware of.
-- Zero non-system dependencies.
+  ~636 KB universal. v3.0 measures ~948 KB universal, v3.1 ~968 KB —
+  the Swift code stays compact.
+- ~~Zero non-system dependencies.~~ **Adjusted in v3.1**: the Swift
+  binary still depends on nothing but the OS, but the `.app` bundle
+  vendors ~1.0 MB of JS/CSS/fonts under `Contents/Resources/preview/`
+  so the new markdown preview can look the way a writing tool should.
+  See README "Brand-promise shift".
 - Right-click → Open is fine. We don't notarize.
 
 If a feature would betray any of these, it doesn't ship.
+
+---
+
+## Shipped in v3.1
+
+- **Per-tab markdown preview** behind ⌘E. Each tab keeps its own mode;
+  edit mode is byte-identical to v3.0.
+- **Vendored renderer stack** in `src/preview/`: markdown-it 14 with
+  footnote/anchor/task-lists/emoji/attrs plugins, highlight.js 11.10 for
+  fenced code, KaTeX 0.16 for `$inline$` and `$$display$$` math, and
+  github-markdown-css 5.6 as the GFM baseline. plume-preview.css tunes
+  the GitHub baseline to Plume's tokens (Fraunces for h1–h3, accent
+  color from the existing palette, 720 px max-width, blockquote with
+  3 px accent border).
+- **State.json v2 migration**. v1 files load transparently; every tab
+  defaults to edit mode and the file rewrites itself on next save.
+- **Menu validation**: Cut and Paste grey out in preview mode. Copy
+  stays enabled (it captures the rendered selection). Find still works
+  in both modes — preview-mode find walks `.md-preview` text nodes.
+
+The bundle grew from 4.3 MB (v3.0) to 5.4 MB (v3.1). Universal binary
+grew from 948 KB to 968 KB. The rest is the vendored renderer.
 
 ---
 

@@ -113,7 +113,30 @@ enum PlumeState {
         var ssh: SSH?
         var contentDraft: String?  // present only when dirty or untitled
         var isDirty: Bool
-        var viewMode: String = "edit"   // "edit" | "preview"  (added in schema v2)
+        var viewMode: String       // "edit" | "preview"  (added in schema v2)
+
+        init(id: String, kind: String, url: String? = nil, ssh: SSH? = nil,
+             contentDraft: String? = nil, isDirty: Bool, viewMode: String = "edit") {
+            self.id = id
+            self.kind = kind
+            self.url = url
+            self.ssh = ssh
+            self.contentDraft = contentDraft
+            self.isDirty = isDirty
+            self.viewMode = viewMode
+        }
+
+        // Custom decode lets v1 files (missing viewMode) load transparently.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.id = try c.decode(String.self, forKey: .id)
+            self.kind = try c.decode(String.self, forKey: .kind)
+            self.url = try c.decodeIfPresent(String.self, forKey: .url)
+            self.ssh = try c.decodeIfPresent(SSH.self, forKey: .ssh)
+            self.contentDraft = try c.decodeIfPresent(String.self, forKey: .contentDraft)
+            self.isDirty = try c.decode(Bool.self, forKey: .isDirty)
+            self.viewMode = (try c.decodeIfPresent(String.self, forKey: .viewMode)) ?? "edit"
+        }
     }
     struct SSH: Codable {
         var user: String?
